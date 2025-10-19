@@ -1,95 +1,82 @@
 # Ensemble Stars 卡面爬取与导出
 
-一个用于从 Gamerch（あんスタMusic）页面自动提取卡面详情并导出为 Excel 的工具，支持多线程、活动名动态识别与无限制卡面数量抓取。
+一个用于爬取 Gamerch「Ensemble Stars Music」卡面详情并导出为 Excel 的实用脚本集。支持多线程提取卡面完整详情、目录页智能解析、卡面数量无限制，以及结果校验与分析辅助脚本。
 
-## 功能特性
-- 多线程抓取卡面详情（名称、基础信息、数值、技能、路线项目）
-- 年度活动目录页面智能提取，活动名动态识别
-- 取消卡面数量上限，抓取到多少就导出多少
-- 导出为 Excel（按模板列顺序），自动命名为 `es2 卡面名称及技能一览YYYYMMDD_HHMMSS.xlsx`
-- 命令行可配置线程数与单线程模式
+## 特性
+- 多线程爬取：目录页与卡面详情均可并发抓取
+- 不限卡面数量：移除所有数量上限，完整提取全年/页面所含卡面
+- 详情完整提取：基本信息、三围、技能、路线项目等字段
+- Excel 导出：按模板列顺序写入，自动包含「活动名称」列
+- 校验脚本：快速验证最新导出与数量分布
 
 ## 环境要求
-- Python 3.10+（建议）
-- 依赖库：`requests`, `beautifulsoup4`, `lxml`, `pandas`, `openpyxl`
+- Windows / PowerShell
+- Python 3.11 及以上
+- 依赖：`requests`、`beautifulsoup4`、`lxml`、`pandas`、`openpyxl`
 
-安装依赖：
-```powershell
+安装示例（如未提供 `requirements.txt`）：
+```
 pip install requests beautifulsoup4 lxml pandas openpyxl
 ```
 
 ## 快速开始
-- 年度活动目录页（示例：2024 年活动目录）：
-```powershell
-cd es
-python crawl_es2.py https://gamerch.com/ensemble-star-music/895943 --max-workers 8
+- 年度目录页爬取（推荐多线程）：
 ```
-- 单线程模式（便于调试）：
-```powershell
-python crawl_es2.py https://gamerch.com/ensemble-star-music/895943 --single-thread
+python es\crawl_es2.py https://gamerch.com/ensemble-star-music/895943 --max-workers 6
 ```
-- 验证结果文件（最新 Excel）：
-```powershell
-python verify_latest_crawl.py
-python verify_unlimited_results.py
+- 单线程模式（排障用）：
 ```
+python es\crawl_es2.py https://gamerch.com/ensemble-star-music/895943 --single-thread
+```
+- 验证无限制结果：
+```
+python es\verify_unlimited_results.py
+```
+- 验证最新导出：
+```
+python es\verify_latest_crawl.py
+```
+
+## 主要脚本
+- `es/crawl_es2.py`：核心爬取与导出逻辑，支持多线程完整详情提取
+- `es/multithreaded_card_fetcher.py`：并发抓取器封装
+- `es/verify_unlimited_results.py`：验证最新 Excel 的卡面数量与活动分布
+- `es/verify_latest_crawl.py`：查看最新导出文件的采样与列
+- 其他：`find_real_events.py`、`search_correct_cards.py` 等辅助脚本
 
 ## 使用说明
-- 入口脚本：`es/crawl_es2.py`
-  - 自动检测目录页或详情页并提取卡面
-  - 目录页使用多线程批量抓取完整详情
-  - 详情页直接解析单卡面
-- 多线程抓取器：`es/multithreaded_card_fetcher.py`
-  - 通过 `MultiThreadedCardFetcher` 批量请求并解析
-  - 可调参数：最大线程数、超时、请求间隔
+- 线程控制：通过 `--max-workers N` 设置线程数（建议 4–8），未指定时默认值由脚本交互选择
+- 目录页识别：自动针对年度目录页（如 `895943`）提取对应日期区域内的卡面与活动名
+- 详情解析：对每个卡面详情页解析基本信息/三围/技能/路线项目等
+- 数量无限制：`find_card_links` 与 `extract_cards_from_directory` 已移除上限，返回全部结果
+- Excel 输出：导出文件位于项目根目录，命名为 `es2 卡面名称及技能一览YYYYMMDD_HHMMSS.xlsx`
+- 模板列顺序：使用 `es2 卡面名称及技能一览（新表）示例.xlsx` 的列顺序，自动插入「活动名称」列
 
-## 常用命令示例
-- 设置线程数为 4：
-```powershell
-python crawl_es2.py https://gamerch.com/ensemble-star-music/895943 --max-workers 4
-```
-- 运行多线程功能测试：
-```powershell
-python test_multithreaded_full_details.py
-```
-- 运行无限制提取测试：
-```powershell
-python test_unlimited_crawl.py
-```
+## 常见问题
+- 页面 404 或无卡面：日志会显示未找到或跳过，继续下一个日期/链接
+- 速度与稳定性：适度降低 `--max-workers`，并留出请求间隔（脚本内部已做节流）
+- 输出未更新：确认脚本仍在运行，可用验证脚本查看最新 Excel 文件
 
-## 输出与模板
-- 输出位置：项目根目录，文件名形如：
-  - `es2 卡面名称及技能一览20251014_011423.xlsx`
-- 模板文件：`es2 卡面名称及技能一览（新表）示例.xlsx`
-  - 用于确定列顺序；若模板中没有“活动名称”，脚本会自动插入
+## 忽略策略
+项目根目录的 `.gitignore` 已配置：
+- 忽略 Excel 输出（`es2 卡面名称及技能一览*.xlsx`，模板示例除外）
+- 忽略调试/测试/分析脚本（`debug_*.py`、`test_*.py`、`verify_*.py`、`check_*.py`、`analyze_*.py` 等）
+- 忽略 Python 缓存与虚拟环境
 
-## 项目结构
+## 目录结构（简）
 ```
-F:/Code/Trae/projects/es/
-├── .gitignore
-├── es2 卡面名称及技能一览（新表）示例.xlsx
-├── es/
-│   ├── crawl_es2.py                  # 主爬取脚本
-│   ├── multithreaded_card_fetcher.py # 多线程抓取器
-│   ├── verify_latest_crawl.py        # 验证最新导出文件
-│   ├── verify_unlimited_results.py   # 验证无限制提取效果
-│   ├── test_multithreaded_full_details.py
-│   ├── test_unlimited_crawl.py
-│   └── ... 其他分析/测试脚本
-└── ...
+es/
+  crawl_es2.py
+  multithreaded_card_fetcher.py
+  verify_unlimited_results.py
+  verify_latest_crawl.py
+  find_real_events.py
+  search_correct_cards.py
+es2 卡面名称及技能一览（新表）示例.xlsx
+README.md
+.gitignore
 ```
 
-## 说明与建议
-- 若出现部分链接返回 404 属正常现象（目录中包含历史或下线页面）
-- 多线程请求对站点有压力，建议合理设置 `--max-workers`（如 4~8），并保留默认请求间隔
-- 若抓取进程没有日志输出，请以生成的 Excel 文件为准验证结果（可用 `verify_latest_crawl.py`）
-
-## 版本控制与产物忽略
-- `.gitignore` 已配置忽略：
-  - 自动生成的 Excel 导出文件
-  - 调试/测试脚本（`debug_*`, `test_*`, `verify_*`, `check_*`, `analyze_*` 等）
-  - Python 缓存与虚拟环境目录
-- 若需要保留特定测试脚本，请在 `.gitignore` 中添加例外规则（如 `!es/test_new_extraction.py`）
-
-## 许可
-- 本仓库代码仅用于技术研究与数据处理，不建议用于高频访问或商业用途。请遵循目标站点的使用条款。
+## 说明
+- 本仓库仅用于技术研究与学习交流，请遵守目标站点的使用条款与机器人政策
+- 如需定制列或导出格式，说明需求即可扩展实现
