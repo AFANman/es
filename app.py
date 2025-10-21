@@ -31,7 +31,7 @@ try:
         sys.path.insert(0, es_path)
     
     from multithreaded_card_fetcher import MultiThreadedCardFetcher
-    from crawl_es2 import extract_cards_from_directory
+    from crawl_es2 import extract_cards_from_directory, crawl_page, map_to_template, write_excel_rows
     import csv
 except ImportError as e:
     print(f"导入模块失败: {e}")
@@ -108,29 +108,14 @@ class CrawlTask:
         try:
             self.add_log('开始爬取任务', 'info')
             
-            # 模拟爬取过程
-            for i, event in enumerate(self.events):
-                if self.cancelled:
-                    break
-                    
-                event_title = event.get('title', f'活动{i+1}')
-                self.update_progress(i, f'正在处理活动 {event_title}...')
-                self.add_log(f'开始处理活动 {event_title}', 'info')
+            if self.cancelled:
+                return
                 
-                # 模拟处理时间
-                time.sleep(2)
-                
-                if self.cancelled:
-                    break
-                    
-                self.add_log(f'活动 {event_title} 处理完成', 'success')
-                self.update_progress(i + 1, f'活动 {event_title} 已完成')
-                
+            # 直接生成Excel文件
+            self.add_log('正在生成Excel文件...', 'info')
+            self._generate_excel()
+            
             if not self.cancelled:
-                # 生成CSV文件
-                self.add_log('正在生成CSV文件...', 'info')
-                self._generate_excel()
-                
                 self.status = 'completed'
                 self.progress['end_time'] = datetime.now().isoformat()
                 self.add_log('爬取任务完成', 'success')
@@ -143,47 +128,96 @@ class CrawlTask:
             logger.error(traceback.format_exc())
             
     def _generate_excel(self):
-        """生成CSV文件"""
+        """直接使用 crawl_es2.py 的导出功能生成Excel文件"""
         try:
-            # 创建示例数据
-            data = []
-            for i, event in enumerate(self.events):
-                event_title = event.get('title', f'活动{i+1}')
-                data.extend([
-                    {
-                        '活动名称': event_title,
-                        '卡面名称': f'卡面 {event_title}-{j+1}',
-                        '角色': f'角色 {j+1}',
-                        '稀有度': '☆5' if j % 3 == 0 else '☆4',
-                        '技能名称': f'技能 {j+1}',
-                        '技能描述': f'这是卡面 {event_title}-{j+1} 的技能描述',
-                        '获取方式': '活动奖励',
-                        '活动日期': '2024年10月'
-                    }
-                    for j in range(3)  # 每个活动3张卡面
-                ])
+            # 选择目录页URL（优先使用前端分析得到的URL，否则回退年度目录页）
+            url = None
+            for ev in self.events:
+                if isinstance(ev, dict) and ev.get('url'):
+                    url = ev['url'].strip()
+                    break
+            if not url:
+                url = 'https://gamerch.com/ensemble-star-music/895943'
+            self.add_log(f'使用目录页URL: {url}', 'info')
+    
+            # 提取选中活动的卡面URL和活动名称映射
+            selected_card_urls = []
+            selected_event_names = []
+            card_url_to_event_name = {}  # 卡面URL到活动名称的映射
             
-            # 生成文件名
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            filename = f'es_cards_{timestamp}.csv'
-            filepath = os.path.join('downloads', filename)
+            for ev in self.events:
+                if isinstance(ev, dict):
+                    # 获取活动名称用于日志显示
+                    event_name = ev.get('title', ev.get('name', '')).strip()
+                    if event_name:
+                        selected_event_names.append(event_name)
+                    
+                    # 获取该活动的所有卡面URL
+                    cards = ev.get('cards', [])
+                    if cards:
+                        self.add_log(f'活动 "{event_name}" 包含 {len(cards)} 个卡面URL', 'info')
+                        for i, card_url in enumerate(cards):
+                            self.add_log(f'  卡面{i+1}: {card_url}', 'info')
+                            selected_card_urls.append(card_url)
+                            # 建立卡面URL到活动名称的映射
+                            card_url_to_event_name[card_url] = event_name
+                elif isinstance(ev, str):
+                    event_name = ev.strip()
+                    if event_name:
+                        selected_event_names.append(event_name)
             
-            # 确保下载目录存在
-            os.makedirs('downloads', exist_ok=True)
+            if selected_event_names:
+                self.add_log(f'选中的活动: {", ".join(selected_event_names)}', 'info')
+                self.add_log(f'选中的卡面URL总数: {len(selected_card_urls)}', 'info')
+            else:
+                self.add_log('未指定活动，将处理所有活动', 'info')
+    
+            # 直接调用 crawl_es2.py 的导出函数
+            from crawl_es2 import export_cards_to_excel
             
-            # 创建CSV文件
-            if data:
-                with open(filepath, 'w', newline='', encoding='utf-8-sig') as csvfile:
-                    fieldnames = data[0].keys()
-                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                    writer.writeheader()
-                    writer.writerows(data)
+            # 设置输出目录为downloads文件夹
+            output_dir = os.path.join(os.path.dirname(__file__), 'downloads')
+            os.makedirs(output_dir, exist_ok=True)
             
-            self.result_file = filepath
-            self.add_log(f'CSV文件已生成: {filename}', 'success')
+            # 定义进度回调函数
+            def progress_callback(stage, percentage, message, eta=None):
+                """进度回调函数，将进度信息添加到日志"""
+                if eta is not None and eta > 0:
+                    eta_str = f" (预计剩余: {eta:.1f}秒)"
+                else:
+                    eta_str = ""
+                
+                log_message = f"[{stage}] {percentage}% - {message}{eta_str}"
+                self.add_log(log_message, 'info')
+                
+                # 更新任务进度
+                self.progress['percentage'] = int(percentage)
+                self.progress['current_task'] = f"[{stage}] {message}"
+                
+                # 根据百分比估算当前完成的任务数
+                if self.progress['total'] > 0:
+                    estimated_current = int((percentage / 100) * self.progress['total'])
+                    self.progress['current'] = min(estimated_current, self.progress['total'])
             
+            # 调用导出函数，传递选中的卡面URL、活动名称映射和进度回调
+            result_file = export_cards_to_excel(
+                url=url,
+                output_dir=output_dir,
+                max_workers=8,
+                selected_card_urls=selected_card_urls if selected_card_urls else None,
+                card_url_to_event_name=card_url_to_event_name if card_url_to_event_name else None,
+                progress_callback=progress_callback
+            )
+            
+            if result_file and os.path.exists(result_file):
+                self.result_file = result_file
+                self.add_log('Excel文件生成完成', 'success')
+            else:
+                raise Exception('导出函数未返回有效的文件路径')
+                
         except Exception as e:
-            raise Exception(f'生成CSV文件失败: {e}')
+            # 让 _run_crawl 捕获并处理失败状态与日志
+            raise
 
 def analyze_directory_url(url: str) -> Dict:
     """分析目录页URL，提取活动信息"""
@@ -205,11 +239,58 @@ def analyze_directory_url(url: str) -> Dict:
             import time
             time.sleep(1)  # Add delay to avoid rate limiting
             logger.info(f"正在获取页面内容: {url}")
-            response = requests.get(url, headers=headers, timeout=20)
+            # 在部分网络环境下可能出现证书链问题，这里临时关闭验证并抑制告警
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            response = requests.get(url, headers=headers, timeout=20, verify=False)
             response.raise_for_status()
             html_content = response.text
             logger.info(f"页面内容获取成功，长度: {len(html_content)} 字符")
+
+            # 基于目录页内容构建卡面链接到月份的映射，用于在UI显示"2025年-月份"
+            # 初始化变量，确保在异常情况下也能使用
+            month_by_card_url = {}
+            month_day_by_card_url = {}
             
+            try:
+                from bs4 import BeautifulSoup
+                import calendar
+                from crawl_es2 import find_cards_by_date_with_dynamic_event_names
+
+                soup = BeautifulSoup(html_content, "lxml")
+
+                # 目标日：每月 1、10、14、15、25、月末前一天、月末
+                target_days_base = [1, 10, 14, 15, 25]
+                for m in range(1, 13):
+                    month_end = calendar.monthrange(2025, m)[1]
+                    pre_end = month_end - 1
+                    day_candidates = sorted(set(target_days_base + [pre_end, month_end]))
+
+                    for d in day_candidates:
+                        # 形式一：前导零
+                        pattern1 = f"{m:02d}月{d:02d}日"
+                        section1 = find_cards_by_date_with_dynamic_event_names(soup, pattern1, expected_event_hint=None)
+                        if section1:
+                            for card_url, _ in section1:
+                                if card_url not in month_by_card_url:
+                                    month_by_card_url[card_url] = m
+                                if card_url not in month_day_by_card_url:
+                                    month_day_by_card_url[card_url] = (m, d)
+                        # 形式二：不带前导零
+                        pattern2 = f"{m}月{d}日"
+                        section2 = find_cards_by_date_with_dynamic_event_names(soup, pattern2, expected_event_hint=None)
+                        if section2:
+                            for card_url, _ in section2:
+                                if card_url not in month_by_card_url:
+                                    month_by_card_url[card_url] = m
+                                if card_url not in month_day_by_card_url:
+                                    month_day_by_card_url[card_url] = (m, d)
+
+                logger.info(f"日期映射构建完成，覆盖 {len(month_by_card_url)} 个卡面链接")
+            except Exception as map_err:
+                logger.warning(f"构建卡面-月份映射失败: {map_err}")
+                month_by_card_url = {}
+
             # 调用爬虫函数
             card_event_pairs = extract_cards_from_directory(html_content, url)
             logger.info(f"从目录页提取到 {len(card_event_pairs)} 个卡面-活动对")
@@ -224,22 +305,6 @@ def analyze_directory_url(url: str) -> Dict:
                 for event_name, count in event_counts.items():
                     logger.info(f"  - {event_name}: {count} 张卡面")
                     
-                # 检查是否包含目标活动
-                target_found = False
-                for event_name in event_counts.keys():
-                    if "08月15日" in event_name and "メガストリーム" in event_name:
-                        logger.info(f"✓ 找到目标活动: {event_name}")
-                        target_found = True
-                        break
-                
-                if not target_found:
-                    logger.warning("❌ 未找到目标活动 '08月15日　【メガストリーム】編／STREAM2：Athletic Atmos'")
-                    # 检查包含08月15日的活动
-                    august_15_events = [name for name in event_counts.keys() if "08月15日" in name]
-                    if august_15_events:
-                        logger.info(f"包含08月15日的活动: {august_15_events}")
-                    else:
-                        logger.warning("未找到任何08月15日的活动")
             else:
                 logger.warning("未提取到任何卡面-活动对")
             
@@ -250,8 +315,8 @@ def analyze_directory_url(url: str) -> Dict:
                     events_dict[event_name] = {
                         'id': str(len(events_dict) + 1),
                         'title': event_name,
-                        'date': '2024年',  # 从活动名称中提取日期
-                        'url': card_url,  # 使用第一个卡面URL作为活动URL
+                        'date': '2025年',
+                        'url': card_url,
                         'description': f'包含 {len([p for p in card_event_pairs if p[1] == event_name])} 张卡面',
                         'cards': []
                     }
@@ -264,13 +329,43 @@ def analyze_directory_url(url: str) -> Dict:
             for event in events:
                 card_count = len(event['cards'])
                 event['description'] = f'包含 {card_count} 张卡面'
-                
-                # 尝试从活动名称中提取日期
-                import re
-                date_match = re.search(r'(\d{1,2}月\d{1,2}日)', event['title'])
-                if date_match:
-                    event['date'] = f"2024年{date_match.group(1)}"
-            
+
+                # 优先根据卡面链接映射出所属“月份+日期”
+                md_pairs = []
+                for u in event['cards']:
+                    md = month_day_by_card_url.get(u)
+                    if md:
+                        md_pairs.append(md)
+                if md_pairs:
+                    md_counts = {}
+                    for md in md_pairs:
+                        md_counts[md] = md_counts.get(md, 0) + 1
+                    dominant_md = max(md_counts, key=md_counts.get)
+                    mm, dd = dominant_md
+                    event['date'] = f"2025年{mm:02d}月{dd:02d}日"
+                else:
+                    # 回退一：从活动名称中提取“月日”
+                    import re
+                    m = re.search(r'(\d{1,2})月(\d{1,2})日', event['title'])
+                    if m:
+                        month = int(m.group(1))
+                        day = int(m.group(2))
+                        event['date'] = f"2025年{month:02d}月{day:02d}日"
+                    else:
+                        # 回退二：仅有月份映射时，填充未知日
+                        months = []
+                        for u in event['cards']:
+                            mm = month_by_card_url.get(u)
+                            if mm:
+                                months.append(mm)
+                        if months:
+                            counts = {}
+                            for mm in months:
+                                counts[mm] = counts.get(mm, 0) + 1
+                            dominant_month = max(counts, key=counts.get)
+                            event['date'] = f"2025年{dominant_month:02d}月??日"
+                        else:
+                            event['date'] = "2025年??月??日"
             logger.info(f"分析完成，找到 {len(events)} 个活动")
             
             return {
@@ -281,46 +376,11 @@ def analyze_directory_url(url: str) -> Dict:
             
         except Exception as crawl_error:
             logger.warning(f"爬虫函数调用失败: {crawl_error}")
-            # 如果爬虫函数失败，使用备用数据
-            events = [
-                {
-                    'id': '1',
-                    'title': '09月14日　スカウト！ロイヤルフラッシュ',
-                    'date': '2024年09月14日',
-                    'url': 'https://gamerch.com/ensemble-star-music/895943',
-                    'description': '9月14日活动 - 皇家同花顺',
-                    'cards': []
-                },
-                {
-                    'id': '2', 
-                    'title': '10月01日　感謝祭◇バタリオン・バタフライin WILDLAND',
-                    'date': '2024年10月01日',
-                    'url': 'https://gamerch.com/ensemble-star-music/895943',
-                    'description': '10月1日活动 - 感谢祭系列',
-                    'cards': []
-                },
-                {
-                    'id': '3',
-                    'title': '10月15日　Witchcraft Halloween Event',
-                    'date': '2024年10月15日',
-                    'url': 'https://gamerch.com/ensemble-star-music/895943',
-                    'description': '10月15日活动 - 万圣节主题',
-                    'cards': []
-                },
-                {
-                    'id': '4',
-                    'title': '11月01日　Bright me up!! Stage：宙',
-                    'date': '2024年11月01日',
-                    'url': 'https://gamerch.com/ensemble-star-music/895943',
-                    'description': '11月1日活动 - Bright me up系列',
-                    'cards': []
-                }
-            ]
-            
+            # 爬虫失败时返回空列表，不使用备用数据
             return {
-                'success': True,
-                'events': events,
-                'message': f'使用备用数据，找到 {len(events)} 个活动（爬虫函数暂时不可用）'
+                'success': False,
+                'events': [],
+                'message': f'爬虫失败: {str(crawl_error)}'
             }
         
     except Exception as e:
@@ -334,7 +394,27 @@ def analyze_directory_url(url: str) -> Dict:
 @app.route('/')
 def index():
     """主页"""
-    return send_file('index.html')
+    return render_template('index.html')
+
+@app.route('/results')
+def results():
+    """结果页面"""
+    task_id = request.args.get('task_id')
+    if not task_id:
+        return render_template('index.html')  # 如果没有task_id，返回主页
+    
+    with task_lock:
+        task = tasks.get(task_id)
+    
+    if not task:
+        return render_template('index.html')  # 如果任务不存在，返回主页
+    
+    return render_template('results.html', task_id=task_id, task=task)
+
+@app.route('/events')
+def events():
+    """活动列表页面"""
+    return render_template('events.html')
 
 @app.route('/api/analyze', methods=['POST'])
 def analyze():
@@ -370,10 +450,15 @@ def analyze():
 def start_crawl():
     """开始爬取API"""
     try:
+        logger.info("收到爬取启动请求")
         data = request.get_json()
+        logger.info(f"请求数据: {data}")
+        
         events = data.get('events', [])
+        logger.info(f"活动列表: {events}")
         
         if not events:
+            logger.warning("未提供活动列表")
             return jsonify({
                 'success': False,
                 'message': '请选择要爬取的活动'
@@ -381,24 +466,33 @@ def start_crawl():
             
         # 创建新任务
         task_id = str(uuid.uuid4())
+        logger.info(f"生成任务ID: {task_id}")
+        
         task = CrawlTask(task_id, events)
+        logger.info(f"创建任务对象: {task}")
         
         with task_lock:
             tasks[task_id] = task
+            logger.info(f"任务已添加到任务列表，当前任务数: {len(tasks)}")
             
         # 启动任务
+        logger.info("启动任务...")
         task.start()
+        logger.info("任务启动完成")
         
         logger.info(f"创建爬取任务: {task_id}, 活动数量: {len(events)}")
         
-        return jsonify({
+        response_data = {
             'success': True,
             'taskId': task_id,
             'message': '爬取任务已启动'
-        })
+        }
+        logger.info(f"返回响应: {response_data}")
+        
+        return jsonify(response_data)
         
     except Exception as e:
-        logger.error(f"启动爬取API错误: {e}")
+        logger.error(f"启动爬取API错误: {e}", exc_info=True)
         return jsonify({
             'success': False,
             'message': f'启动失败: {str(e)}'
@@ -416,14 +510,21 @@ def get_progress(task_id):
                 'success': False,
                 'message': '任务不存在'
             }), 404
-            
-        return jsonify({
+        
+        # 构建响应数据
+        response_data = {
             'success': True,
             'status': task.status,
             'progress': task.progress,
             'resultFile': task.result_file,
             'errorMessage': task.error_message
-        })
+        }
+        
+        # 如果任务完成且有结果文件，添加下载URL
+        if task.status == 'completed' and task.result_file:
+            response_data['download_url'] = f'/api/download/{task_id}'
+            
+        return jsonify(response_data)
         
     except Exception as e:
         logger.error(f"获取进度API错误: {e}")
@@ -535,6 +636,10 @@ def styles():
 @app.route('/script.js')
 def script():
     return send_file('script.js')
+
+@app.route('/events.js')
+def events_js():
+    return send_file('static/events.js')
 
 # 清理过期任务的后台线程
 def cleanup_old_tasks():

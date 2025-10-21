@@ -111,10 +111,17 @@ class AppState {
     }
 
     // 更新爬取进度
-    updateProgress(current, total, currentTask = '') {
+    updateProgress(current, total, currentTask = '', percentage = null) {
         this.crawlProgress.current = current;
         this.crawlProgress.total = total;
-        this.crawlProgress.percentage = total > 0 ? Math.round((current / total) * 100) : 0;
+        
+        // 如果提供了具体的百分比，使用它；否则根据current/total计算
+        if (percentage !== null) {
+            this.crawlProgress.percentage = Math.round(percentage);
+        } else {
+            this.crawlProgress.percentage = total > 0 ? Math.round((current / total) * 100) : 0;
+        }
+        
         this.crawlProgress.currentTask = currentTask;
 
         // 更新UI
@@ -238,15 +245,15 @@ class ApiService {
         }
     }
 
-    // 开始爬取
-    async startCrawl(eventIds) {
+    // 开始爬取（调用真实后端）
+    async startCrawl(events) {
         try {
-            const response = await fetch(`${this.baseUrl}/crawl`, {
+            const response = await fetch(`${this.baseUrl}/crawl/start`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ eventIds })
+                body: JSON.stringify({ events })
             });
 
             if (!response.ok) {
@@ -304,6 +311,7 @@ class EnsembleStarsApp {
         this.api = new ApiService();
         this.currentTaskId = null;
         this.progressInterval = null;
+        this.lastProcessedLogIndex = 0;
 
         this.init();
     }
@@ -311,9 +319,6 @@ class EnsembleStarsApp {
     init() {
         this.bindEvents();
         this.setupValidation();
-        
-        // 模拟数据（开发阶段使用）
-        this.setupMockData();
     }
 
     // 绑定事件监听器
@@ -425,9 +430,13 @@ class EnsembleStarsApp {
             const result = await this.api.analyzeDirectory(url);
 
             if (result.success && result.events.length > 0) {
-                this.state.setEvents(result.events);
-                this.state.switchPage('event');
-                this.notification.show(`成功找到 ${result.events.length} 个活动`, 'success');
+                this.notification.show(`分析完成！找到 ${result.events.length} 个活动`, 'success');
+                
+                // 跳转到活动列表页面，传递活动数据
+                setTimeout(() => {
+                    const eventsParam = encodeURIComponent(JSON.stringify(result.events));
+                    window.location.href = `/events?events=${eventsParam}`;
+                }, 1500);
             } else {
                 this.notification.show('未找到符合条件的活动', 'warning');
             }
@@ -441,45 +450,13 @@ class EnsembleStarsApp {
         }
     }
 
-    // 分析目录页（模拟实现）
+    // 分析目录页
     async analyzeDirectory(url) {
-        // 模拟API调用延迟
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        // 模拟返回数据
-        return {
-            success: true,
-            events: [
-                {
-                    id: '1',
-                    title: '感谢祭◇バタリオン・バタフライin WILDLAND',
-                    date: '2024年10月',
-                    url: 'https://gamerch.com/ensemble-star-music/event1',
-                    description: '10月活动 - 感谢祭系列'
-                },
-                {
-                    id: '2',
-                    title: 'Witchcraft Halloween Event',
-                    date: '2024年10月',
-                    url: 'https://gamerch.com/ensemble-star-music/event2',
-                    description: '万圣节主题活动'
-                },
-                {
-                    id: '3',
-                    title: 'Bright me up!! Stage：宙',
-                    date: '2024年10月',
-                    url: 'https://gamerch.com/ensemble-star-music/event3',
-                    description: 'Bright me up系列活动'
-                },
-                {
-                    id: '4',
-                    title: 'SELECTION 10 UNIT SONG 06',
-                    date: '2024年10月',
-                    url: 'https://gamerch.com/ensemble-star-music/event4',
-                    description: '单元歌曲纪念活动'
-                }
-            ]
-        };
+        return fetch('/api/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url })
+        }).then(r => r.json());
     }
 
     // 处理事件点击
@@ -550,14 +527,23 @@ class EnsembleStarsApp {
             progressSection.style.display = 'block';
             progressSection.scrollIntoView({ behavior: 'smooth' });
 
+            // 隐藏下载按钮
+            const downloadBtn = document.getElementById('downloadProgressBtn');
+            if (downloadBtn) {
+                downloadBtn.style.display = 'none';
+                downloadBtn.classList.remove('pulse');
+            }
+
             // 初始化进度
             this.state.crawlProgress.startTime = Date.now();
             this.state.crawlProgress.logs = [];
+            this.lastProcessedLogIndex = 0;
             this.state.updateProgress(0, this.state.selectedEvents.size, '准备开始爬取...');
 
-            // 开始爬取
-            const eventIds = Array.from(this.state.selectedEvents);
-            const result = await this.startCrawl(eventIds);
+            // 构建选中事件列表并调用真实后端
+            const selectedIds = Array.from(this.state.selectedEvents);
+            const events = this.state.events.filter(e => selectedIds.includes(e.id));
+            const result = await this.api.startCrawl(events);
 
             if (result.success) {
                 this.currentTaskId = result.taskId;
@@ -575,36 +561,141 @@ class EnsembleStarsApp {
         }
     }
 
-    // 开始爬取（模拟实现）
-    async startCrawl(eventIds) {
-        // 模拟API调用延迟
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-        return {
-            success: true,
-            taskId: 'task_' + Date.now(),
-            message: '爬取任务已启动'
-        };
-    }
-
-    // 开始进度监控
+    // 开始进度监控（轮询后端进度）
     startProgressMonitoring() {
-        let progress = 0;
-        const total = this.state.selectedEvents.size;
-        
-        this.progressInterval = setInterval(() => {
-            progress++;
-            
-            if (progress <= total) {
-                const currentTask = `正在处理第 ${progress} 个活动...`;
-                this.state.updateProgress(progress, total, currentTask);
-                this.state.addLog(`完成活动 ${progress}/${total}`, 'info');
-                
-                if (progress === total) {
-                    this.completeCrawl();
+        const poll = async () => {
+            if (!this.currentTaskId) return;
+            try {
+                const res = await this.api.getCrawlProgress(this.currentTaskId);
+                if (!res.success) {
+                    this.state.addLog(res.message || '获取进度失败', 'error');
+                    return;
                 }
+    
+                const p = res.progress || {};
+                const current = p.current || 0;
+                const total = p.total || 0;
+                const currentTask = p.current_task || '';
+                const percentage = p.percentage !== undefined ? p.percentage : null;
+                console.debug('[Progress]', { status: res.status, current, total, percentage });
+                
+                // 使用后端提供的百分比（如果有）
+                this.state.updateProgress(current, total, currentTask, percentage);
+                
+                // 当进度达到100%，提前显示禁用的下载按钮，避免视觉空窗
+                const effectivePercent = percentage !== null 
+                    ? Math.round(percentage) 
+                    : (total > 0 ? Math.round((current / total) * 100) : null);
+                if (effectivePercent !== null && effectivePercent >= 100) {
+                    const downloadBtnEarly = document.getElementById('downloadProgressBtn');
+                    if (downloadBtnEarly) {
+                        console.debug('[UI] Early show download button, effectivePercent =', effectivePercent);
+                        downloadBtnEarly.style.display = 'flex';
+                        downloadBtnEarly.classList.add('pulse');
+                        downloadBtnEarly.disabled = true;
+                        downloadBtnEarly.title = '正在准备文件，请稍候...';
+                    }
+                }
+                
+                // 处理后端传来的日志
+                if (res.logs && Array.isArray(res.logs)) {
+                    // 获取最新的日志条目（避免重复显示）
+                    const lastLogIndex = this.lastProcessedLogIndex || 0;
+                    const newLogs = res.logs.slice(lastLogIndex);
+                    
+                    // 添加新的日志条目
+                    for (const log of newLogs) {
+                        if (log.message) {
+                            this.state.addLog(log.message, log.type || 'info');
+                        }
+                    }
+                    
+                    // 更新已处理的日志索引
+                    this.lastProcessedLogIndex = res.logs.length;
+                }
+    
+                if (res.status === 'completed' && res.resultFile) {
+                    clearInterval(this.progressInterval);
+                    this.progressInterval = null;
+                    this.state.isLoading = false;
+                    this.state.addLog('所有活动处理完成', 'success');
+                    this.state.addLog('Excel文件生成完成', 'success');
+                    document.getElementById('startCrawlBtn').classList.remove('loading');
+
+                    // 显示进度区域的下载按钮
+                    const downloadBtn = document.getElementById('downloadProgressBtn');
+                    if (downloadBtn) {
+                        console.debug('[UI] Enable download button for task', this.currentTaskId);
+                        downloadBtn.style.display = 'flex';
+                        downloadBtn.classList.add('pulse');
+                        downloadBtn.disabled = false;
+                        downloadBtn.title = '下载';
+                        // 移除旧的事件监听器并添加新的
+                        downloadBtn.onclick = null;
+                        const currentTaskId = this.currentTaskId;
+                        downloadBtn.onclick = () => this.downloadExcelWithTaskId(currentTaskId);
+                    }
+
+                    // 显示下载兜底按钮（防止浏览器阻止自动下载）
+                    const fb = document.getElementById('downloadFallback');
+                    const fblink = document.getElementById('downloadFallbackLink');
+                    if (fb && fblink) {
+                        fblink.href = `/api/download/${this.currentTaskId}`;
+                        fb.style.display = 'block';
+                        // 添加醒目的样式
+                        fb.style.animation = 'pulse 2s infinite';
+                        fb.style.border = '2px solid #007bff';
+                        fb.style.borderRadius = '8px';
+                        fb.style.padding = '16px';
+                        fb.style.backgroundColor = '#f8f9fa';
+                    }
+
+                    // 添加明显的下载提示日志
+                    this.state.addLog('📥 文件已准备就绪，请点击上方下载按钮获取Excel文件', 'success');
+                    
+                    // 移除自动跳转，让用户可以持续查看日志和下载文件
+                    this.notification.show('爬取完成！请点击下载按钮获取Excel文件。', 'success', 10000);
+                } else if (res.status === 'failed') {
+                    clearInterval(this.progressInterval);
+                    this.progressInterval = null;
+                    this.state.isLoading = false;
+                    document.getElementById('startCrawlBtn').classList.remove('loading');
+                    
+                    // 隐藏下载按钮
+                    const downloadBtn = document.getElementById('downloadProgressBtn');
+                    if (downloadBtn) {
+                        downloadBtn.style.display = 'none';
+                        downloadBtn.classList.remove('pulse');
+                    }
+                    
+                    this.notification.show(`爬取失败：${res.errorMessage || '未知错误'}`, 'error');
+                } else if (res.status === 'cancelled') {
+                    clearInterval(this.progressInterval);
+                    this.progressInterval = null;
+                    this.state.isLoading = false;
+                    document.getElementById('startCrawlBtn').classList.remove('loading');
+                    
+                    // 隐藏下载按钮
+                    const downloadBtn = document.getElementById('downloadProgressBtn');
+                    if (downloadBtn) {
+                        downloadBtn.style.display = 'none';
+                        downloadBtn.classList.remove('pulse');
+                    }
+                    
+                    this.notification.show('爬取任务已取消', 'warning');
+                }
+            } catch (error) {
+                console.error('获取进度失败:', error);
             }
-        }, 2000); // 每2秒更新一次进度
+        };
+    
+        if (this.progressInterval) {
+            clearInterval(this.progressInterval);
+            this.progressInterval = null;
+        }
+    
+        this.progressInterval = setInterval(poll, 2000);
+        poll();
     }
 
     // 完成爬取
@@ -616,34 +707,47 @@ class EnsembleStarsApp {
 
         this.state.isLoading = false;
         this.state.addLog('所有活动处理完成', 'success');
-        this.state.addLog('正在生成Excel文件...', 'info');
-
-        // 模拟文件生成
-        setTimeout(() => {
-            this.state.addLog('Excel文件生成完成', 'success');
-            this.downloadExcel();
-            
-            document.getElementById('startCrawlBtn').classList.remove('loading');
-            this.notification.show('爬取完成！Excel文件已下载', 'success');
-        }, 1000);
+        
+        // 真实的爬取完成处理由events.js中的轮询机制处理
+        document.getElementById('startCrawlBtn').classList.remove('loading');
     }
 
     // 下载Excel文件
     downloadExcel() {
-        // 创建模拟的Excel文件下载
-        const filename = `es_cards_${new Date().toISOString().split('T')[0]}.xlsx`;
-        
-        // 这里应该是实际的文件下载逻辑
-        // 现在只是模拟下载
+        if (!this.currentTaskId) {
+            this.state.addLog('无法下载：任务ID不存在', 'error');
+            return;
+        }
+
+        // 创建下载链接并触发下载
+        const downloadUrl = `/api/download/${this.currentTaskId}`;
         const link = document.createElement('a');
-        link.href = '#'; // 实际应该是文件的URL
-        link.download = filename;
-        link.textContent = '下载Excel文件';
+        link.href = downloadUrl;
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
         
-        this.state.addLog(`文件已保存: ${filename}`, 'success');
+        this.state.addLog('开始下载Excel文件...', 'success');
+    }
+
+    // 使用指定任务ID下载Excel文件
+    downloadExcelWithTaskId(taskId) {
+        if (!taskId) {
+            this.state.addLog('无法下载：任务ID不存在', 'error');
+            return;
+        }
+
+        // 创建下载链接并触发下载
+        const downloadUrl = `/api/download/${taskId}`;
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
         
-        // 实际项目中，这里应该触发真实的文件下载
-        // link.click();
+        this.state.addLog(`开始下载Excel文件 (任务ID: ${taskId})...`, 'success');
     }
 
     // 处理取消爬取
@@ -651,7 +755,7 @@ class EnsembleStarsApp {
         if (!this.currentTaskId) return;
 
         try {
-            await this.cancelCrawl(this.currentTaskId);
+            await this.api.cancelCrawl(this.currentTaskId);
             
             if (this.progressInterval) {
                 clearInterval(this.progressInterval);
@@ -664,6 +768,13 @@ class EnsembleStarsApp {
             document.getElementById('startCrawlBtn').classList.remove('loading');
             document.getElementById('progressSection').style.display = 'none';
             
+            // 隐藏下载按钮
+            const downloadBtn = document.getElementById('downloadProgressBtn');
+            if (downloadBtn) {
+                downloadBtn.style.display = 'none';
+                downloadBtn.classList.remove('pulse');
+            }
+            
             this.state.addLog('爬取任务已取消', 'warning');
             this.notification.show('爬取任务已取消', 'warning');
 
@@ -673,17 +784,20 @@ class EnsembleStarsApp {
         }
     }
 
-    // 取消爬取（模拟实现）
+    // 取消爬取
     async cancelCrawl(taskId) {
-        await new Promise(resolve => setTimeout(resolve, 500));
-        return { success: true };
+        try {
+            const response = await fetch(`/api/cancel/${taskId}`, {
+                method: 'POST'
+            });
+            return await response.json();
+        } catch (error) {
+            console.error('取消爬取失败:', error);
+            return { success: false, error: error.message };
+        }
     }
 
-    // 设置模拟数据（开发阶段）
-    setupMockData() {
-        // 可以在这里设置一些测试数据
-        console.log('Ensemble Stars Music 卡面爬取工具已初始化');
-    }
+
 }
 
 // 页面加载完成后初始化应用

@@ -32,6 +32,10 @@ class MultiThreadedCardFetcher:
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         })
+        # Disable SSL verification and suppress warnings for self-signed corporate proxies
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        self.session.verify = False
         
         # 统计信息
         self.stats = {
@@ -183,12 +187,13 @@ class MultiThreadedCardFetcher:
         
         return results
     
-    def fetch_card_full_details_batch(self, card_info_list: List[Tuple[str, str]]) -> List[Dict[str, str]]:
+    def fetch_card_full_details_batch(self, card_info_list: List[Tuple[str, str]], progress_callback=None) -> List[Dict[str, str]]:
         """
         批量获取完整卡面详情（包括基础信息、状态、技能、道具等）
         
         Args:
             card_info_list: List[Tuple[card_url, event_name]] - 卡面URL和活动名称的列表
+            progress_callback: 进度回调函数，接收(stage, progress, message, eta)参数
             
         Returns:
             List[Dict] - 完整卡面信息的列表
@@ -201,6 +206,9 @@ class MultiThreadedCardFetcher:
         
         print(f"开始批量获取 {len(card_info_list)} 个卡面的完整详情...")
         print(f"使用 {self.max_workers} 个线程，请求间隔 {self.delay} 秒")
+        
+        if progress_callback:
+            progress_callback("数据获取", 30, f"开始批量获取 {len(card_info_list)} 个卡面详情...")
         
         results = []
         
@@ -225,12 +233,24 @@ class MultiThreadedCardFetcher:
                         with self.lock:
                             self.stats['failed'] += 1
                     
+                    # 计算进度和ETA
+                    progress = 30 + (completed / len(card_info_list)) * 50  # 30-80%的进度范围
+                    elapsed = time.time() - self.stats['start_time']
+                    if completed > 0:
+                        eta = (elapsed / completed) * (len(card_info_list) - completed)
+                    else:
+                        eta = None
+                    
                     # 每处理5个显示进度
                     if completed % 5 == 0 or completed == len(card_info_list):
+                        message = f"进度: {completed}/{len(card_info_list)} 成功: {self.stats['success']} 失败: {self.stats['failed']}"
                         print(f"进度: {completed}/{len(card_info_list)} "
                               f"({completed/len(card_info_list)*100:.1f}%) "
                               f"成功: {self.stats['success']} "
                               f"失败: {self.stats['failed']}")
+                        
+                        if progress_callback:
+                            progress_callback("数据获取", progress, message, eta)
                         
                 except Exception as e:
                     card_url, event_name = future_to_info[future]
@@ -286,7 +306,7 @@ class MultiThreadedCardFetcher:
             
             # 构建行数据
             row = build_row(card_name, basic, status, skills, road_items)
-            row["活动名称"] = event_name
+            row["イベント名"] = event_name
             
             return row
             

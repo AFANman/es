@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>爬取结果 - Ensemble Stars Music 卡面爬取工具</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>爬取结果</h1>
+            <p>任务ID: {{ task_id }}</p>
+        </header>
+
+        <main>
+            <div class="result-summary">
+                <h2>任务状态</h2>
+                <div class="status-info">
+                    <p><strong>状态:</strong> 
+                        <span class="status {{ task.status }}">
+                            {% if task.status == 'completed' %}已完成
+                            {% elif task.status == 'running' %}进行中
+                            {% elif task.status == 'failed' %}失败
+                            {% else %}{{ task.status }}
+                            {% endif %}
+                        </span>
+                    </p>
+                    {% if task.status == 'completed' %}
+                    <p><strong>完成时间:</strong> {{ task.end_time.strftime('%Y-%m-%d %H:%M:%S') if task.end_time else '未知' }}</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            {% if task.status == 'completed' and task.result_file %}
+            <div class="download-section">
+                <h2>下载结果</h2>
+                <a href="/api/download/{{ task_id }}" class="download-btn" download>
+                    <span>📥</span> 下载Excel文件
+                </a>
+            </div>
+            {% endif %}
+
+            <div class="actions">
+                <a href="/" class="btn btn-secondary">返回主页</a>
+                {% if task.status == 'completed' %}
+                <button onclick="location.reload()" class="btn btn-primary">刷新状态</button>
+                {% endif %}
+            </div>
+        </main>
+    </div>
+
+    <style>
+        .result-summary {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .status-info p {
+            margin: 10px 0;
+        }
+
+        .status {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+
+        .status.completed {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status.running {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .status.failed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .download-section {
+            text-align: center;
+            margin: 30px 0;
+        }
+
+        .download-btn {
+            display: inline-block;
+            background: #007bff;
+            color: white;
+            padding: 15px 30px;
+            text-decoration: none;
+            border-radius: 8px;
+            font-size: 18px;
+            transition: background 0.3s;
+        }
+
+        .download-btn:hover {
+            background: #0056b3;
+        }
+
+        .actions {
+            text-align: center;
+            margin-top: 30px;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            margin: 0 10px;
+            text-decoration: none;
+            border-radius: 5px;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn:hover {
+            opacity: 0.8;
+        }
+    </style>
+</body>
+</html>

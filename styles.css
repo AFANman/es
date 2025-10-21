@@ -134,6 +134,7 @@ body {
     padding: 3rem;
     box-shadow: var(--shadow-xl);
     backdrop-filter: blur(10px);
+    margin-bottom: 120px; /* 为底部固定区域留出空间 */
 }
 
 .intro-section {
@@ -285,18 +286,22 @@ body {
 /* 活动页样式 */
 #eventPage .container {
     max-width: 1400px;
-    padding: 1rem 2rem;
+    padding: 1rem;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
 }
 
 .page-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    background: var(--bg-primary);
     padding: 1.5rem 2rem;
+    background: var(--bg-primary);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-md);
     margin-bottom: 2rem;
+    flex-shrink: 0;
 }
 
 .back-btn {
@@ -305,11 +310,12 @@ body {
     gap: 0.5rem;
     padding: 0.75rem 1.5rem;
     background: var(--gray-100);
+    color: var(--gray-700);
     border: none;
     border-radius: var(--radius-md);
-    color: var(--gray-700);
     cursor: pointer;
     transition: all var(--transition-fast);
+    font-weight: 500;
 }
 
 .back-btn:hover {
@@ -317,7 +323,7 @@ body {
 }
 
 .page-header h1 {
-    font-size: 1.875rem;
+    font-size: 1.5rem;
     font-weight: 600;
     color: var(--gray-800);
 }
@@ -331,13 +337,14 @@ body {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.75rem 1rem;
+    padding: 0.75rem 1.5rem;
     background: var(--primary-color);
     color: white;
     border: none;
     border-radius: var(--radius-md);
     cursor: pointer;
     transition: all var(--transition-fast);
+    font-weight: 500;
 }
 
 .action-btn:hover {
@@ -350,12 +357,18 @@ body {
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-lg);
     overflow: hidden;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    position: relative;
 }
 
 .content-layout {
     display: grid;
-    grid-template-columns: 350px 1fr;
-    min-height: 600px;
+    grid-template-columns: 400px 1fr;
+    flex: 1;
+    overflow: hidden;
+    margin-bottom: 100px; /* 为固定底部按钮留出空间 */
 }
 
 /* 侧边栏 */
@@ -364,6 +377,7 @@ body {
     border-right: 1px solid var(--gray-200);
     display: flex;
     flex-direction: column;
+    height: 100%;
 }
 
 .sidebar-header {
@@ -372,6 +386,7 @@ body {
     justify-content: space-between;
     padding: 1.5rem;
     border-bottom: 1px solid var(--gray-200);
+    flex-shrink: 0;
 }
 
 .sidebar-header h3 {
@@ -385,16 +400,18 @@ body {
 
 .event-count {
     font-size: 0.875rem;
-    color: var(--gray-500);
-    background: var(--gray-100);
+    color: var(--primary-color);
+    background: var(--primary-light);
     padding: 0.25rem 0.75rem;
     border-radius: var(--radius-sm);
+    font-weight: 500;
 }
 
 .search-box {
     position: relative;
     padding: 1rem 1.5rem;
     border-bottom: 1px solid var(--gray-200);
+    flex-shrink: 0;
 }
 
 .search-box i {
@@ -419,10 +436,68 @@ body {
     border-color: var(--primary-color);
 }
 
+/* 下拉刷新指示器 */
+.pull-refresh-indicator {
+    position: absolute;
+    top: -60px;
+    left: 0;
+    right: 0;
+    height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: var(--bg-secondary);
+    color: var(--gray-600);
+    font-size: 14px;
+    opacity: 0;
+    transform: translateY(0);
+    transition: all 0.3s ease;
+    z-index: 10;
+    border-radius: 0 0 8px 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.pull-refresh-indicator.ready {
+    color: var(--primary-color);
+}
+
+.pull-refresh-indicator i {
+    font-size: 16px;
+    transition: transform 0.3s ease;
+}
+
+.pull-refresh-indicator.ready i {
+    transform: rotate(180deg);
+}
+
+/* 活动列表样式 */
 .event-list {
     flex: 1;
     overflow-y: auto;
     padding: 1rem 0;
+    position: relative;
+    /* 自定义滚动条样式 */
+    scrollbar-width: thin;
+    scrollbar-color: var(--gray-300) transparent;
+}
+
+/* Webkit浏览器滚动条样式 */
+.event-list::-webkit-scrollbar {
+    width: 6px;
+}
+
+.event-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.event-list::-webkit-scrollbar-thumb {
+    background: var(--gray-300);
+    border-radius: 3px;
+}
+
+.event-list::-webkit-scrollbar-thumb:hover {
+    background: var(--gray-400);
 }
 
 .event-item {
@@ -450,6 +525,28 @@ body {
 }
 
 .event-checkbox {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.25rem;
+    height: 1.25rem;
+    position: relative;
+    cursor: pointer;
+}
+
+/* 隐藏原生checkbox */
+.event-checkbox input[type="checkbox"] {
+    position: absolute;
+    opacity: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    cursor: pointer;
+}
+
+/* 自定义checkbox样式 */
+.event-checkbox label {
+    display: block;
     width: 1.25rem;
     height: 1.25rem;
     border: 2px solid var(--gray-300);
@@ -457,8 +554,33 @@ body {
     position: relative;
     cursor: pointer;
     transition: all var(--transition-fast);
+    background: white;
 }
 
+/* 选中状态 */
+.event-checkbox input[type="checkbox"]:checked + label {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
+/* 选中状态的勾号 */
+.event-checkbox input[type="checkbox"]:checked + label::after {
+    content: '✓';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: white;
+    font-size: 0.75rem;
+    font-weight: bold;
+}
+
+/* 悬停效果 */
+.event-checkbox:hover label {
+    border-color: var(--primary-color);
+}
+
+/* 保持向后兼容的旧样式 */
 .event-checkbox.checked {
     background: var(--primary-color);
     border-color: var(--primary-color);
@@ -495,6 +617,8 @@ body {
     padding: 1.5rem;
     display: flex;
     flex-direction: column;
+    height: 100%;
+    overflow: hidden;
 }
 
 .preview-header {
@@ -504,6 +628,7 @@ body {
     margin-bottom: 1.5rem;
     padding-bottom: 1rem;
     border-bottom: 1px solid var(--gray-200);
+    flex-shrink: 0;
 }
 
 .preview-header h3 {
@@ -529,6 +654,28 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
+    overflow-y: auto;
+    /* 自定义滚动条样式 */
+    scrollbar-width: thin;
+    scrollbar-color: var(--gray-300) transparent;
+}
+
+/* Webkit浏览器滚动条样式 */
+.preview-content::-webkit-scrollbar {
+    width: 6px;
+}
+
+.preview-content::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.preview-content::-webkit-scrollbar-thumb {
+    background: var(--gray-300);
+    border-radius: 3px;
+}
+
+.preview-content::-webkit-scrollbar-thumb:hover {
+    background: var(--gray-400);
 }
 
 .empty-state {
@@ -547,12 +694,25 @@ body {
 
 /* 底部操作区域 */
 .bottom-actions {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--bg-primary);
+    border-top: 1px solid var(--gray-200);
+    box-shadow: 0 -4px 6px -1px rgb(0 0 0 / 0.1);
+    z-index: 1000;
+    backdrop-filter: blur(10px);
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+/* 默认状态布局 */
+.action-default {
     display: flex;
     align-items: center;
     justify-content: space-between;
     padding: 1.5rem 2rem;
-    background: var(--bg-secondary);
-    border-top: 1px solid var(--gray-200);
 }
 
 .action-summary {
@@ -568,10 +728,15 @@ body {
 /* 进度区域 */
 .progress-section {
     background: var(--bg-primary);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-lg);
-    margin-top: 2rem;
     overflow: hidden;
+    width: 100%;
+}
+
+/* 当进度区域在底部时，移除边距和圆角 */
+.bottom-actions .progress-section {
+    border-radius: 0;
+    box-shadow: none;
+    margin-top: 0;
 }
 
 .progress-header {
@@ -590,6 +755,44 @@ body {
     font-size: 1.125rem;
     font-weight: 600;
     color: var(--gray-800);
+}
+
+.progress-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.download-progress-btn {
+    padding: 0.5rem 1rem;
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.download-progress-btn:hover {
+    background: var(--primary-dark);
+    transform: translateY(-1px);
+}
+
+.download-progress-btn:active {
+    transform: translateY(0);
+}
+
+.download-progress-btn.pulse {
+    animation: pulse 2s infinite;
+}
+
+.download-progress-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
 }
 
 .cancel-btn {
@@ -840,6 +1043,186 @@ body {
     color: var(--gray-600);
 }
 
+/* 活动列表页面特定样式 */
+#eventsPage .event-sidebar {
+    position: relative;
+    overflow: hidden;
+}
+
+#eventsPage .event-list {
+    padding: 0;
+    margin: 0;
+}
+
+#eventsPage .event-item {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-color);
+    transition: all 0.2s ease;
+    cursor: pointer;
+}
+
+#eventsPage .event-item:hover {
+    background: var(--bg-secondary);
+}
+
+#eventsPage .event-item:last-child {
+    border-bottom: none;
+}
+
+#eventsPage .event-checkbox {
+    margin-right: 12px;
+}
+
+#eventsPage .event-content {
+    flex: 1;
+    min-width: 0;
+}
+
+#eventsPage .event-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 4px;
+}
+
+#eventsPage .event-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+    margin: 0;
+    line-height: 1.4;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#eventsPage .event-date {
+    font-size: 12px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    margin-left: 8px;
+}
+
+#eventsPage .event-details {
+    display: flex;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+#eventsPage .event-type {
+    background: var(--primary-color);
+    color: white;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+}
+
+#eventsPage .event-cards {
+    color: var(--text-secondary);
+}
+
+#eventsPage .event-preview-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    padding: 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    margin-left: 8px;
+}
+
+#eventsPage .event-preview-btn:hover {
+    background: var(--bg-secondary);
+    color: var(--primary-color);
+}
+
+/* 预览区域样式 */
+#eventsPage .preview-event {
+    padding: 20px;
+}
+
+#eventsPage .preview-header-info {
+    margin-bottom: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+#eventsPage .preview-header-info h3 {
+    margin: 0 0 8px 0;
+    color: var(--text-primary);
+    font-size: 18px;
+}
+
+#eventsPage .preview-date {
+    color: var(--text-secondary);
+    font-size: 14px;
+}
+
+#eventsPage .preview-details {
+    margin-bottom: 20px;
+}
+
+#eventsPage .detail-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-light);
+}
+
+#eventsPage .detail-row:last-child {
+    border-bottom: none;
+}
+
+#eventsPage .detail-row .label {
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+#eventsPage .detail-row .value {
+    color: var(--text-primary);
+    text-align: right;
+    max-width: 60%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#eventsPage .preview-cards {
+    margin-top: 20px;
+}
+
+#eventsPage .preview-cards h4 {
+    margin: 0 0 12px 0;
+    color: var(--text-primary);
+    font-size: 16px;
+}
+
+#eventsPage .cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 8px;
+}
+
+#eventsPage .card-item {
+    background: var(--bg-secondary);
+    padding: 8px;
+    border-radius: 6px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+}
+
+#eventsPage .card-item.more {
+    background: var(--primary-color);
+    color: white;
+    font-weight: 500;
+}
+
 /* 动画定义 */
 @keyframes fadeIn {
     from {
@@ -871,6 +1254,7 @@ body {
 @media (max-width: 1024px) {
     .content-layout {
         grid-template-columns: 300px 1fr;
+        margin-bottom: 120px; /* 增加底部边距 */
     }
     
     .progress-details {
@@ -899,18 +1283,27 @@ body {
     
     .content-layout {
         grid-template-columns: 1fr;
+        grid-template-rows: auto 1fr;
+        margin-bottom: 140px; /* 移动端增加更多底部边距 */
     }
     
     .event-sidebar {
         border-right: none;
         border-bottom: 1px solid var(--gray-200);
-        max-height: 400px;
+        max-height: 300px;
+        height: auto;
     }
     
     .bottom-actions {
         flex-direction: column;
         gap: 1rem;
         text-align: center;
+        padding: 1rem;
+    }
+    
+    .crawl-btn {
+        width: 100%;
+        min-width: auto;
     }
     
     .features {
@@ -949,6 +1342,92 @@ body {
     .progress-details {
         grid-template-columns: 1fr;
     }
+}
+
+/* 日志容器样式 */
+#logContainer {
+    background: var(--bg-primary);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+    max-height: 300px;
+    overflow-y: auto;
+    font-family: 'Courier New', monospace;
+    font-size: 0.875rem;
+    line-height: 1.4;
+    margin-top: 1rem;
+    box-shadow: var(--shadow-sm);
+}
+
+.log-item {
+    padding: 0.25rem 0;
+    border-bottom: 1px solid var(--gray-100);
+    display: flex;
+    gap: 0.5rem;
+    word-wrap: break-word;
+}
+
+.log-item:last-child {
+    border-bottom: none;
+}
+
+.log-item.info {
+    color: var(--gray-700);
+}
+
+.log-item.debug {
+    color: var(--primary-color);
+    background-color: var(--primary-light);
+    padding: 0.25rem 0.5rem;
+    border-radius: var(--radius-sm);
+    margin: 0.125rem 0;
+}
+
+.log-item.warning {
+    color: var(--warning-color);
+}
+
+.log-item.error {
+    color: var(--error-color);
+    background-color: #fef2f2;
+    padding: 0.25rem 0.5rem;
+    border-radius: var(--radius-sm);
+    margin: 0.125rem 0;
+}
+
+.log-item.success {
+    color: var(--success-color);
+}
+
+.log-time {
+    color: var(--gray-500);
+    font-size: 0.75rem;
+    min-width: 80px;
+    flex-shrink: 0;
+}
+
+.log-message {
+    flex: 1;
+    word-break: break-word;
+}
+
+/* 日志容器滚动条样式 */
+#logContainer::-webkit-scrollbar {
+    width: 6px;
+}
+
+#logContainer::-webkit-scrollbar-track {
+    background: var(--gray-100);
+    border-radius: 3px;
+}
+
+#logContainer::-webkit-scrollbar-thumb {
+    background: var(--gray-400);
+    border-radius: 3px;
+}
+
+#logContainer::-webkit-scrollbar-thumb:hover {
+    background: var(--gray-500);
 }
 
 /* 打印样式 */
