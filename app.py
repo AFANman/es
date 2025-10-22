@@ -681,4 +681,4 @@ if __name__ == '__main__':
     os.makedirs('downloads', exist_ok=True)
     
     logger.info("启动Ensemble Stars Music卡面爬取工具服务")
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=8001, debug=False)

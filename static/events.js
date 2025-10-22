@@ -50,9 +50,14 @@ class EventsPage {
             this.startCrawl();
         });
 
-        // 取消爬取按钮
+        // 返回按钮
         document.getElementById('cancelCrawlBtn').addEventListener('click', () => {
-            this.cancelCrawl();
+            this.returnToMain();
+        });
+
+        // 立即下载按钮
+        document.getElementById('downloadProgressBtn').addEventListener('click', () => {
+            this.downloadResult();
         });
 
         // 通知关闭按钮
@@ -412,10 +417,10 @@ class EventsPage {
         
         // 禁用爬取按钮
         const startBtn = document.getElementById('startCrawlBtn');
-        if (startBtn) {
-            startBtn.disabled = true;
-            startBtn.textContent = '启动中...';
-        }
+        // if (startBtn) {
+        //     startBtn.disabled = true;
+        //     startBtn.textContent = '启动中...';
+        // }
         
         try {
             console.log('发送爬取请求...');
@@ -640,33 +645,63 @@ class EventsPage {
 
     // 显示下载按钮
     showDownloadButton(downloadUrl) {
-        const downloadFallback = document.getElementById('downloadFallback');
-        const downloadLink = document.getElementById('downloadFallbackLink');
+        // 保存下载URL
+        this.downloadUrl = downloadUrl;
         
-        if (!downloadFallback || !downloadLink) {
-            console.warn('[Download] Fallback elements missing; creating download button in log area.');
-            // 不再自动下载，而是在日志区域显示下载提示
-            this.updateLogs([{
-                level: 'success',
-                time: new Date().toLocaleTimeString(),
-                message: `📥 文件已准备就绪！请手动点击下载链接: ${downloadUrl}`
-            }]);
-            return;
+        // 显示立即下载按钮
+        const downloadBtn = document.getElementById('downloadProgressBtn');
+        if (downloadBtn) {
+            downloadBtn.style.display = 'inline-flex';
+            downloadBtn.classList.add('pulse');
         }
         
-        downloadLink.href = downloadUrl;
-        downloadFallback.style.display = 'block';
-        
-        // 移除自动触发下载，让用户手动点击
         // 在日志中添加下载提示
         this.updateLogs([{
             level: 'success',
             time: new Date().toLocaleTimeString(),
-            message: '📥 文件已准备就绪！请点击上方的"下载 Excel"按钮获取文件'
+            message: '📥 文件已准备就绪！请点击"立即下载"按钮获取文件'
         }]);
     }
 
+    // 下载结果文件
+    downloadResult() {
+        if (!this.downloadUrl) {
+            this.showNotification('下载链接不可用', 'error');
+            return;
+        }
+        
+        // 创建临时链接进行下载
+        const link = document.createElement('a');
+        link.href = this.downloadUrl;
+        link.download = '';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        this.showNotification('开始下载文件', 'success');
+    }
+
     // 取消爬取
+    // 返回主页面
+    returnToMain() {
+        // 隐藏进度区域，回到开始爬取页面
+        this.hideProgressSection();
+        
+        // 清理进度监控
+        if (this.progressInterval) {
+            clearInterval(this.progressInterval);
+            this.progressInterval = null;
+        }
+        
+        // 隐藏下载按钮
+        const downloadBtn = document.getElementById('downloadProgressBtn');
+        if (downloadBtn) {
+            downloadBtn.style.display = 'none';
+        }
+        
+        this.showNotification('已返回主页面', 'info');
+    }
+
     async cancelCrawl() {
         if (!this.currentTask) return;
 

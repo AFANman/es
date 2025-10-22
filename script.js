@@ -323,9 +323,10 @@ class EnsembleStarsApp {
 
     // 绑定事件监听器
     bindEvents() {
-        // 启动页事件
+        // 绑定事件监听器
         document.getElementById('urlInput').addEventListener('input', this.handleUrlInput.bind(this));
         document.getElementById('analyzeBtn').addEventListener('click', this.handleAnalyze.bind(this));
+        document.getElementById('useDefaultBtn').addEventListener('click', this.handleUseDefault.bind(this));
 
         // 活动页事件
         document.getElementById('backBtn').addEventListener('click', () => {
@@ -345,7 +346,7 @@ class EnsembleStarsApp {
         });
 
         document.getElementById('startCrawlBtn').addEventListener('click', this.handleStartCrawl.bind(this));
-        document.getElementById('cancelCrawlBtn').addEventListener('click', this.handleCancelCrawl.bind(this));
+        document.getElementById('cancelCrawlBtn').addEventListener('click', this.handleReturnToMain.bind(this));
 
         // 事件列表点击事件（事件委托）
         document.getElementById('eventList').addEventListener('click', this.handleEventClick.bind(this));
@@ -370,15 +371,15 @@ class EnsembleStarsApp {
             const isValid = this.validateUrl(url);
 
             if (url === '') {
-                feedback.textContent = '将使用默认链接进行分析';
+                feedback.textContent = '💡 可直接点击"分析目录页"使用默认链接，或点击"默认"按钮快速填入';
                 feedback.className = 'input-feedback';
                 analyzeBtn.disabled = false; // 允许使用默认链接
             } else if (isValid) {
-                feedback.textContent = '✓ 链接格式正确';
+                feedback.textContent = '✓ 链接格式正确，可以开始分析';
                 feedback.className = 'input-feedback success';
                 analyzeBtn.disabled = false;
             } else {
-                feedback.textContent = '✗ 请输入有效的Gamerch链接';
+                feedback.textContent = '✗ 请输入有效的Gamerch链接（ensemble-star-music相关页面）';
                 feedback.className = 'input-feedback error';
                 analyzeBtn.disabled = true;
             }
@@ -403,6 +404,21 @@ class EnsembleStarsApp {
     // 处理URL输入
     handleUrlInput(event) {
         // 输入验证已在setupValidation中处理
+    }
+
+    // 处理使用默认链接按钮
+    handleUseDefault() {
+        const urlInput = document.getElementById('urlInput');
+        const defaultUrl = 'https://gamerch.com/ensemble-star-music/895943';
+        
+        urlInput.value = defaultUrl;
+        urlInput.dispatchEvent(new Event('input')); // 触发验证
+        
+        // 添加视觉反馈
+        this.notification.show('已填入默认链接', 'success');
+        
+        // 聚焦到输入框
+        urlInput.focus();
     }
 
     // 处理分析按钮点击
@@ -782,6 +798,36 @@ class EnsembleStarsApp {
             console.error('取消爬取失败:', error);
             this.notification.show('取消爬取失败', 'error');
         }
+    }
+
+    // 返回主页面
+    handleReturnToMain() {
+        // 隐藏进度区域
+        document.getElementById('progressSection').style.display = 'none';
+        
+        // 重置开始按钮状态
+        const startBtn = document.getElementById('startCrawlBtn');
+        startBtn.classList.remove('loading');
+        startBtn.disabled = false;
+        
+        // 隐藏下载按钮
+        const downloadBtn = document.getElementById('downloadProgressBtn');
+        if (downloadBtn) {
+            downloadBtn.style.display = 'none';
+            downloadBtn.classList.remove('pulse');
+        }
+        
+        // 清理进度监控
+        if (this.progressInterval) {
+            clearInterval(this.progressInterval);
+            this.progressInterval = null;
+        }
+        
+        // 重置状态
+        this.state.isLoading = false;
+        this.currentTaskId = null;
+        
+        this.state.addLog('已返回主页面', 'info');
     }
 
     // 取消爬取

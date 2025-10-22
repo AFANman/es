@@ -1236,6 +1236,31 @@ def map_to_template(row: Dict[str, str], columns_order: List[str], use_initial_s
 def write_excel_rows(out_path: str, rows: List[Dict[str, str]], columns_order: List[str]) -> None:
     normalized = [{col: r.get(col, "") for col in columns_order} for r in rows]
     df = pd.DataFrame(normalized, columns=columns_order)
+    
+    # 按活动名称和卡面名称排序
+    sort_columns = []
+    if "活动名称" in df.columns:
+        sort_columns.append("活动名称")
+    if "イベント名" in df.columns:
+        sort_columns.append("イベント名")
+    if "卡面名称" in df.columns:
+        sort_columns.append("卡面名称")
+    elif "カード名" in df.columns:
+        sort_columns.append("カード名")
+    
+    # 如果找到了排序列，则进行排序
+    if sort_columns:
+        # 处理空值，将空字符串和NaN替换为"未知"以便排序
+        for col in sort_columns:
+            if col in df.columns:
+                df[col] = df[col].fillna("未知").replace("", "未知")
+        
+        # 执行排序：先按活动名称，再按卡面名称
+        df = df.sort_values(by=sort_columns, ascending=True, na_position='last')
+        
+        # 重置索引
+        df = df.reset_index(drop=True)
+    
     df.to_excel(out_path, index=False)
 
 

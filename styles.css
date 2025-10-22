@@ -171,14 +171,52 @@ body {
     margin-bottom: 0.5rem;
 }
 
+.input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
 .url-input {
-    width: 100%;
+    flex: 1;
     padding: 1rem;
     border: 2px solid var(--gray-200);
     border-radius: var(--radius-lg);
     font-size: 1rem;
     transition: all var(--transition-fast);
     background: var(--bg-primary);
+}
+
+.use-default-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.75rem 1rem;
+    background: var(--gray-100);
+    color: var(--gray-600);
+    border: 2px solid var(--gray-200);
+    border-radius: var(--radius-lg);
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    white-space: nowrap;
+}
+
+.use-default-btn:hover {
+    background: var(--gray-200);
+    color: var(--gray-700);
+    border-color: var(--gray-300);
+    transform: translateY(-1px);
+}
+
+.use-default-btn:active {
+    transform: translateY(0);
+}
+
+.use-default-btn i {
+    font-size: 0.875rem;
 }
 
 .url-input:focus {

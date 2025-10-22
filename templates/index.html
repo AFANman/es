@@ -34,17 +34,23 @@
                             <i class="fas fa-link"></i>
                             目录页链接
                         </label>
-                        <input 
-                            type="url" 
-                            id="urlInput" 
-                            class="url-input"
-                            placeholder="https://gamerch.com/ensemble-star-music/895943"
-                            required
-                        >
+                        <div class="input-wrapper">
+                            <input 
+                                type="url" 
+                                id="urlInput" 
+                                class="url-input"
+                                placeholder="输入目录页链接或直接点击分析使用默认链接"
+                                required
+                            >
+                            <button id="useDefaultBtn" class="use-default-btn" title="使用默认链接">
+                                <i class="fas fa-magic"></i>
+                                <span>默认</span>
+                            </button>
+                        </div>
                         <div class="input-feedback" id="inputFeedback"></div>
                     </div>
                     
-                    <button id="analyzeBtn" class="analyze-btn" disabled>
+                    <button id="analyzeBtn" class="analyze-btn">
                         <i class="fas fa-search"></i>
                         <span>分析目录页</span>
                         <div class="loading-spinner"></div>
@@ -72,139 +78,7 @@
         </div>
     </div>
 
-    <!-- 活动页 -->
-    <div id="eventPage" class="page">
-        <div class="container">
-            <header class="page-header">
-                <button id="backBtn" class="back-btn">
-                    <i class="fas fa-arrow-left"></i>
-                    返回
-                </button>
-                <h1>活动选择</h1>
-                <div class="header-actions">
-                    <button id="selectAllBtn" class="action-btn">
-                        <i class="fas fa-check-double"></i>
-                        全选
-                    </button>
-                    <button id="clearAllBtn" class="action-btn">
-                        <i class="fas fa-times"></i>
-                        清空
-                    </button>
-                </div>
-            </header>
-            
-            <main class="event-main">
-                <div class="content-layout">
-                    <!-- 左侧活动列表 -->
-                    <aside class="event-sidebar">
-                        <div class="sidebar-header">
-                            <h3>
-                                <i class="fas fa-calendar-alt"></i>
-                                活动列表
-                            </h3>
-                            <span class="event-count" id="eventCount">0 个活动</span>
-                        </div>
-                        
-                        <div class="search-box">
-                            <i class="fas fa-search"></i>
-                            <input type="text" id="eventSearch" placeholder="搜索活动...">
-                        </div>
-                        
-                        <div class="event-list" id="eventList">
-                            <!-- 活动项目将通过JavaScript动态生成 -->
-                        </div>
-                    </aside>
-                    
-                    <!-- 右侧预览区域 -->
-                    <section class="preview-section">
-                        <div class="preview-header">
-                            <h3>
-                                <i class="fas fa-eye"></i>
-                                活动预览
-                            </h3>
-                            <span class="selected-count" id="selectedCount">已选择 0 个活动</span>
-                        </div>
-                        
-                        <div class="preview-content" id="previewContent">
-                            <div class="empty-state">
-                                <i class="fas fa-mouse-pointer"></i>
-                                <p>点击左侧活动查看详情</p>
-                            </div>
-                        </div>
-                    </section>
-                </div>
-                
-                <!-- 底部操作区域 -->
-                <div class="bottom-actions">
-                    <div class="action-summary">
-                        <span id="actionSummary">请选择要爬取的活动</span>
-                    </div>
-                    <button id="startCrawlBtn" class="crawl-btn" disabled>
-                        <i class="fas fa-download"></i>
-                        <span>开始爬取</span>
-                        <div class="loading-spinner"></div>
-                    </button>
-                </div>
-                
-                <!-- 进度显示区域 -->
-                <div class="progress-section" id="progressSection" style="display: none;">
-                    <div class="progress-header">
-                        <h3>
-                            <i class="fas fa-cog fa-spin"></i>
-                            爬取进度
-                        </h3>
-                        <div class="progress-actions">
-                            <button id="downloadProgressBtn" class="download-progress-btn" style="display: none;">
-                                <i class="fas fa-download"></i>
-                                下载
-                            </button>
-                            <button id="cancelCrawlBtn" class="cancel-btn">
-                                <i class="fas fa-stop"></i>
-                                取消
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <div class="progress-content">
-                        <div class="progress-bar-container">
-                            <div class="progress-bar">
-                                <div class="progress-fill" id="progressFill"></div>
-                            </div>
-                            <span class="progress-text" id="progressText">0%</span>
-                        </div>
-                        
-                        <div class="progress-details">
-                            <div class="detail-item">
-                                <span class="label">当前任务:</span>
-                                <span class="value" id="currentTask">准备中...</span>
-                            </div>
-                            <div class="detail-item">
-                                <span class="label">已完成:</span>
-                                <span class="value" id="completedCount">0</span>
-                            </div>
-                            <div class="detail-item">
-                                <span class="label">总数:</span>
-                                <span class="value" id="totalCount">0</span>
-                            </div>
-                            <div class="detail-item">
-                                <span class="label">预计剩余:</span>
-                                <span class="value" id="estimatedTime">计算中...</span>
-                            </div>
-                        </div>
-                        
-                        <div class="log-section">
-                            <h4>处理日志</h4>
-                            <div class="log-container" id="logContainer">
-                                <!-- 日志信息将动态添加 -->
-                            </div>
-                        </div>
 
-                        
-                    </div>
-                </div>
-            </main>
-        </div>
-    </div>
 
     <!-- 加载遮罩 -->
     <div id="loadingOverlay" class="loading-overlay">
