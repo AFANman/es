@@ -329,32 +329,57 @@ class EnsembleStarsApp {
         document.getElementById('useDefaultBtn').addEventListener('click', this.handleUseDefault.bind(this));
 
         // 活动页事件
-        document.getElementById('backBtn').addEventListener('click', () => {
-            this.state.switchPage('start');
-        });
+        const backBtn = document.getElementById('backBtn');
+        if (backBtn) {
+            backBtn.addEventListener('click', () => {
+                this.state.switchPage('start');
+            });
+        }
 
-        document.getElementById('selectAllBtn').addEventListener('click', () => {
-            this.state.selectAllEvents();
-        });
+        const selectAllBtn = document.getElementById('selectAllBtn');
+        if (selectAllBtn) {
+            selectAllBtn.addEventListener('click', () => {
+                this.state.selectAllEvents();
+            });
+        }
 
-        document.getElementById('clearAllBtn').addEventListener('click', () => {
-            this.state.clearAllEvents();
-        });
+        const clearAllBtn = document.getElementById('clearAllBtn');
+        if (clearAllBtn) {
+            clearAllBtn.addEventListener('click', () => {
+                this.state.clearAllEvents();
+            });
+        }
 
-        document.getElementById('eventSearch').addEventListener('input', () => {
-            this.state.updateEventDisplay();
-        });
+        const eventSearch = document.getElementById('eventSearch');
+        if (eventSearch) {
+            eventSearch.addEventListener('input', () => {
+                this.state.updateEventDisplay();
+            });
+        }
 
-        document.getElementById('startCrawlBtn').addEventListener('click', this.handleStartCrawl.bind(this));
-        document.getElementById('cancelCrawlBtn').addEventListener('click', this.handleReturnToMain.bind(this));
+        const startCrawlBtn = document.getElementById('startCrawlBtn');
+        if (startCrawlBtn) {
+            startCrawlBtn.addEventListener('click', this.handleStartCrawl.bind(this));
+        }
+
+        const cancelCrawlBtn = document.getElementById('cancelCrawlBtn');
+        if (cancelCrawlBtn) {
+            cancelCrawlBtn.addEventListener('click', this.handleReturnToMain.bind(this));
+        }
 
         // 事件列表点击事件（事件委托）
-        document.getElementById('eventList').addEventListener('click', this.handleEventClick.bind(this));
+        const eventList = document.getElementById('eventList');
+        if (eventList) {
+            eventList.addEventListener('click', this.handleEventClick.bind(this));
+        }
 
         // 通知关闭事件
-        document.querySelector('.notification-close').addEventListener('click', () => {
-            this.notification.hide();
-        });
+        const notificationClose = document.querySelector('.notification-close');
+        if (notificationClose) {
+            notificationClose.addEventListener('click', () => {
+                this.notification.hide();
+            });
+        }
     }
 
     // 设置输入验证

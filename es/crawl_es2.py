@@ -1743,7 +1743,21 @@ def export_cards_to_excel(url: str, output_dir: str = None, max_workers: int = 8
         
         # 收集卡面链接
         links = []
-        if is_detail:
+        if selected_card_urls:
+            # 优先使用前端选中的卡面URL，跳过页面提取
+            print(f"接收到前端选中的卡面URL，共 {len(selected_card_urls)} 个，直接处理")
+            report_progress("链接接收", 20, f"接收到选中卡面链接 {len(selected_card_urls)} 个")
+            links = []
+            for card_url in selected_card_urls:
+                if card_url_to_event_name and card_url in card_url_to_event_name:
+                    event_name = card_url_to_event_name[card_url]
+                else:
+                    event_name = "未知活动"
+                links.append((card_url, event_name))
+            # 使用目录页处理逻辑（多线程）
+            is_directory = True
+            is_detail = False
+        elif is_detail:
             # 检测到卡面详情页
             if selected_card_urls:
                 # 如果有选中的卡面URL，直接处理这些URL，不重定向

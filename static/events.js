@@ -56,14 +56,20 @@ class EventsPage {
         });
 
         // 立即下载按钮
-        document.getElementById('downloadProgressBtn').addEventListener('click', () => {
-            this.downloadResult();
-        });
+        const downloadProgressBtn = document.getElementById('downloadProgressBtn');
+        if (downloadProgressBtn) {
+            downloadProgressBtn.addEventListener('click', () => {
+                this.downloadResult();
+            });
+        }
 
         // 通知关闭按钮
-        document.querySelector('.notification-close').addEventListener('click', () => {
-            this.hideNotification();
-        });
+        const notificationCloseBtn = document.querySelector('.notification-close');
+        if (notificationCloseBtn) {
+            notificationCloseBtn.addEventListener('click', () => {
+                this.hideNotification();
+            });
+        }
     }
 
     // 初始化下拉刷新功能
