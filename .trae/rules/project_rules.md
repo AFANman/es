@@ -18,3 +18,7 @@ alwaysApply: false
 - 遵循面向对象设计原则（SOLID）
 - 使用异常处理保证程序健壮性
 - 使用 `dataclasses` 或 `pydantic` 模型表示数据
+
+# 本项目文档
+- 接口文档 ~/docs/api_documentation.md
+- 项目文档 ~/docs/project_documentation.md
