@@ -12,7 +12,7 @@ class ApiService {
     // 从Redis获取活动数据
     async getEventsFromCache(sessionId) {
         try {
-            const response = await fetch(`/api/events/${sessionId}`, {
+            const response = await fetch(`/es/api/events/${sessionId}`, {
                 method: 'GET',
                 headers: {
                     'Content-Type': 'application/json',
@@ -33,7 +33,7 @@ class ApiService {
     // 开始爬取
     async startCrawl(events) {
         try {
-            const response = await fetch(`${this.baseUrl}/crawl/start`, {
+            const response = await fetch(`/es/api/crawl/start`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -55,7 +55,7 @@ class ApiService {
     // 获取爬取进度
     async getCrawlProgress(taskId) {
         try {
-            const response = await fetch(`${this.baseUrl}/progress/${taskId}`);
+            const response = await fetch(`/es/api/progress/${taskId}`);
             
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
@@ -71,7 +71,7 @@ class ApiService {
     // 取消爬取
     async cancelCrawl(taskId) {
         try {
-            const response = await fetch(`${this.baseUrl}/cancel/${taskId}`, {
+            const response = await fetch(`/es/api/cancel/${taskId}`, {
                 method: 'POST'
             });
 
@@ -113,7 +113,7 @@ class EventsPage {
     bindEvents() {
         // 返回首页按钮
         document.getElementById('backToHomeBtn').addEventListener('click', () => {
-            window.location.href = '/';
+            window.location.href = '/es/';
         });
 
         // 全选/清空按钮
@@ -342,7 +342,7 @@ class EventsPage {
             <div class="empty-state">
                 <i class="fas fa-calendar-times"></i>
                 <p>暂无活动数据</p>
-                <button onclick="window.location.href='/'" class="btn-secondary">
+                <button onclick="window.location.href='/es/'" class="btn-secondary">
                     返回首页重新分析
                 </button>
             </div>
@@ -356,7 +356,7 @@ class EventsPage {
             <div class="empty-state">
                 <i class="fas fa-exclamation-triangle"></i>
                 <p>${message}</p>
-                <button onclick="window.location.href='/'" class="btn-secondary">
+                <button onclick="window.location.href='/es/'" class="btn-secondary">
                     返回首页重新分析
                 </button>
             </div>
@@ -556,7 +556,7 @@ class EventsPage {
         
         try {
             console.log('发送爬取请求...');
-            const response = await fetch('/api/crawl/start', {
+            const response = await fetch(`/es/api/crawl/start`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -633,7 +633,7 @@ class EventsPage {
         if (!this.currentTask) return;
 
         try {
-            const response = await fetch(`/api/progress/${this.currentTask}`);
+            const response = await fetch(`/es/api/progress/${this.currentTask}`);
             const progress = await response.json();
 
             this.updateProgressDisplay(progress);
@@ -801,7 +801,7 @@ class EventsPage {
             this.showNotification('下载链接不可用', 'error');
             return;
         }
-        
+        console.log("下载链接:", this.downloadUrl);
         // 创建临时链接进行下载
         const link = document.createElement('a');
         link.href = this.downloadUrl;
@@ -838,7 +838,7 @@ class EventsPage {
         if (!this.currentTask) return;
 
         try {
-            const response = await fetch(`/api/cancel/${this.currentTask}`, {
+            const response = await fetch(`/es/api/cancel/${this.currentTask}`, {
                 method: 'POST'
             });
 
@@ -903,7 +903,7 @@ class EventsPage {
                 // 如果任务是在24小时内完成的，显示下载按钮
                 if (now - completedAt < 24 * 60 * 60 * 1000) {
                     // 验证任务是否仍然有效
-                    const response = await fetch(`/api/progress/${lastCompletedTask.taskId}`);
+                    const response = await fetch(`/es/api/progress/${lastCompletedTask.taskId}`);
                     if (response.ok) {
                         const progress = await response.json();
                         if (progress.success && progress.status === 'completed' && progress.download_url) {
@@ -914,7 +914,7 @@ class EventsPage {
             }
             
             // 同时检查是否有其他已完成的任务
-            const tasksResponse = await fetch('/api/tasks');
+            const tasksResponse = await fetch(`/es/api/tasks`);
             if (tasksResponse.ok) {
                 const tasksData = await tasksResponse.json();
                 if (tasksData.success && tasksData.tasks && tasksData.tasks.length > 0) {
@@ -922,7 +922,7 @@ class EventsPage {
                     const completedTasks = tasksData.tasks.filter(task => task.status === 'completed');
                     if (completedTasks.length > 0) {
                         const latestTask = completedTasks[completedTasks.length - 1];
-                        const progressResponse = await fetch(`/api/progress/${latestTask.taskId}`);
+                        const progressResponse = await fetch(`/es/api/progress/${latestTask.taskId}`);
                         if (progressResponse.ok) {
                             const progress = await progressResponse.json();
                             if (progress.success && progress.download_url) {

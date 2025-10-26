@@ -220,13 +220,13 @@ class LoadingManager {
 // API 服务
 class ApiService {
     constructor() {
-        this.baseUrl = '/api'; // 假设后端API的基础URL
+        this.baseUrl = '/es/api'; // 假设后端API的基础URL
     }
 
     // 分析目录页
     async analyzeDirectory(url) {
         try {
-            const response = await fetch('/api/analyze', {
+            const response = await fetch(`${this.baseUrl}/analyze`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -248,7 +248,7 @@ class ApiService {
     // 从Redis获取活动数据
     async getEventsFromCache(sessionId) {
         try {
-            const response = await fetch(`/api/events/${sessionId}`, {
+            const response = await fetch(`${this.baseUrl}/events/${sessionId}`, {
                 method: 'GET',
                 headers: {
                     'Content-Type': 'application/json',
@@ -498,7 +498,7 @@ class EnsembleStarsApp {
                     
                     // 跳转到活动列表页面，传递会话ID
                     setTimeout(() => {
-                        window.location.href = `/events?session_id=${result.session_id}`;
+                        window.location.href = `/es/events?session_id=${result.session_id}`;
                     }, 1500);
                 } else if (result.events && result.events.length > 0) {
                     // 回退到原始方式（Redis不可用时）
@@ -507,7 +507,7 @@ class EnsembleStarsApp {
                     // 跳转到活动列表页面，传递活动数据
                     setTimeout(() => {
                         const eventsParam = encodeURIComponent(JSON.stringify(result.events));
-                        window.location.href = `/events?events=${eventsParam}`;
+                        window.location.href = `/es/events?events=${eventsParam}`;
                     }, 1500);
                 } else {
                     this.notification.show('未找到符合条件的活动', 'warning');
@@ -527,7 +527,7 @@ class EnsembleStarsApp {
 
     // 分析目录页
     async analyzeDirectory(url) {
-        return fetch('/api/analyze', {
+        return fetch(`${this.baseUrl}/analyze`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url })
@@ -715,7 +715,7 @@ class EnsembleStarsApp {
                     const fb = document.getElementById('downloadFallback');
                     const fblink = document.getElementById('downloadFallbackLink');
                     if (fb && fblink) {
-                        fblink.href = `/api/download/${this.currentTaskId}`;
+                        fblink.href = `${this.baseUrl}/download/${this.currentTaskId}`;
                         fb.style.display = 'block';
                         // 添加醒目的样式
                         fb.style.animation = 'pulse 2s infinite';
@@ -795,7 +795,7 @@ class EnsembleStarsApp {
         }
 
         // 创建下载链接并触发下载
-        const downloadUrl = `/api/download/${this.currentTaskId}`;
+        const downloadUrl = `${this.baseUrl}/download/${this.currentTaskId}`;
         const link = document.createElement('a');
         link.href = downloadUrl;
         link.style.display = 'none';
@@ -814,7 +814,7 @@ class EnsembleStarsApp {
         }
 
         // 创建下载链接并触发下载
-        const downloadUrl = `/api/download/${taskId}`;
+        const downloadUrl = `${this.baseUrl}/download/${taskId}`;
         const link = document.createElement('a');
         link.href = downloadUrl;
         link.style.display = 'none';
@@ -892,7 +892,7 @@ class EnsembleStarsApp {
     // 取消爬取
     async cancelCrawl(taskId) {
         try {
-            const response = await fetch(`/api/cancel/${taskId}`, {
+            const response = await fetch(`${this.baseUrl}/cancel/${taskId}`, {
                 method: 'POST'
             });
             return await response.json();

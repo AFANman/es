@@ -575,7 +575,7 @@ def get_progress(task_id):
         
         # 如果任务完成且有结果文件，添加下载URL
         if task.status == 'completed' and task.result_file:
-            response_data['download_url'] = f'/api/download/{task_id}'
+            response_data['download_url'] = f'/es/api/download/{task_id}'
             
         return jsonify(response_data)
         
@@ -682,15 +682,15 @@ def list_tasks():
         }), 500
 
 # 静态文件服务
-@app.route('/styles.css')
+@app.route('/es/static/styles.css')
 def styles():
-    return send_file('styles.css')
+    return send_file('static/styles.css')
 
-@app.route('/script.js')
+@app.route('/es/static/script.js')
 def script():
-    return send_file('script.js')
+    return send_file('static/script.js')
 
-@app.route('/events.js')
+@app.route('/es/static/events.js')
 def events_js():
     return send_file('static/events.js')
 
