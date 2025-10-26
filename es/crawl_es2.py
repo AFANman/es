@@ -19,210 +19,281 @@ from multithreaded_card_fetcher import MultiThreadedCardFetcher
 
 
 def crawl_page(url: str) -> Tuple[str, str]:
-    """Return (html, markdown) using Crawl4AI if available, else requests.
     """
+    爬取指定URL的页面内容，优先使用Crawl4AI，失败时回退到requests。
+    
+    功能说明：
+    - 优先尝试使用 Crawl4AI 进行页面爬取，支持 JavaScript 渲染的动态页面
+    - 如果 Crawl4AI 不可用或失败，则回退到传统的 requests 方式
+    - 返回页面的 HTML 内容和 Markdown 格式（如果可用）
+    
+    参数：
+    - url: 要爬取的页面URL
+    
+    返回：
+    - Tuple[str, str]: (HTML内容, Markdown内容)，Markdown可能为空字符串
+    
+    异常处理：
+    - Crawl4AI 异常时自动回退到 requests
+    - requests 异常会向上抛出，由调用方处理
+    """
+    # 优先使用 Crawl4AI（支持 JavaScript 渲染）
     if HAS_CRAWL4AI:
         try:
+            # 配置无头浏览器
             browser_cfg = BrowserConfig(headless=True)
             crawler = WebCrawler(browser_config=browser_cfg)
-            # Minimal config; allow JS for dynamic pages
+            # 最小配置，允许 JavaScript 执行以处理动态页面
             crawl_cfg = CrawlConfig()
             result = crawler.crawl(url=url, config=crawl_cfg)
             html = result.html or ""
             md = getattr(result, "markdown", "") or ""
+            # 如果成功获取到HTML内容，返回结果
             if html.strip():
                 return html, md
         except Exception:
+            # Crawl4AI 失败时静默回退到 requests
             pass
 
-    # Fallback
+    # 回退方案：使用 requests 进行传统HTTP请求
     headers = {
+        # 模拟真实浏览器的请求头，避免被反爬虫机制拦截
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": "ja,en-US;q=0.7,en;q=0.3",
+        "Accept-Language": "ja,en-US;q=0.7,en;q=0.3",  # 优先日语，适合日本网站
         "Accept-Encoding": "gzip, deflate, br",
         "Connection": "keep-alive",
         "Upgrade-Insecure-Requests": "1",
     }
     import time
-    time.sleep(1)  # Add delay to avoid rate limiting
+    time.sleep(1)  # 添加延迟避免触发频率限制
     resp = requests.get(url, headers=headers, timeout=20, verify=False)
-    resp.raise_for_status()
-    return resp.text, ""
+    resp.raise_for_status()  # 如果HTTP状态码表示错误，抛出异常
+    return resp.text, ""  # 返回HTML内容，Markdown为空
 
 
-def find_card_links_loose(soup: BeautifulSoup, base_url: str) -> List[str]:
-    """Looser finder for detail links on listing pages.
-    - Collect anchors whose href contains '/ensemble-star-music/<digits>'
-    - Prefer within the "スカウト追加カード" section but fallback to whole page
-    - Do NOT require bracketed text on anchor; normalize to absolute URLs
-    """
-    urls: List[str] = []
-    base_id = re.search(r"ensemble-star-music/(\d+)", base_url)
-    base_id_str = base_id.group(1) if base_id else None
-
-    section = soup.find(lambda t: t.name in {"h2", "h3", "div", "section"} and "スカウト追加カード" in t.get_text("\n", strip=True))
-    anchors: List[Tuple[str, str]] = []
-    if section:
-        cur = section
-        for _ in range(40):
-            cur = cur.find_next_sibling()
-            if not cur:
-                break
-            txt = cur.get_text("\n", strip=True)
-            if any(k in txt for k in ["★ リンク一覧", "キャラクター", "IRマス詳細", "必要素材数"]):
-                break
-            for a in cur.find_all('a', href=True):
-                anchors.append((a['href'], a.get_text(strip=True)))
-    else:
-        for a in soup.find_all('a', href=True):
-            anchors.append((a['href'], a.get_text(strip=True)))
-
-    for href, _ in anchors:
-        if 'ensemble-star-music/' not in href:
-            continue
-        m = re.search(r"ensemble-star-music/(\d+)", href)
-        if not m:
-            continue
-        card_id = m.group(1)
-        if not card_id or card_id == base_id_str:
-            continue
-        if href.startswith('http'):
-            urls.append(href)
-        else:
-            urls.append('https://gamerch.com/' + href.lstrip('/'))
-    # Deduplicate (no limit on number of cards)
-    seen = set()
-    dedup: List[str] = []
-    for u in urls:
-        if u not in seen:
-            seen.add(u)
-            dedup.append(u)
-    return dedup
+# 已移除：find_card_links_loose（不在 web 链路中使用）
 
 
 def find_card_links(soup: BeautifulSoup, base_url: str) -> List[str]:
-    """Find detail page links for cards from a listing/campaign page.
-    Heuristics:
-    - anchors whose href contains '/ensemble-star-music/<digits>'
-    - anchor text contains a full-width bracketed card name like ［...］
-    - exclude the base url itself
-    Limit to a reasonable number to avoid long runs.
+    """
+    从活动页面或列表页面中提取卡面详情页链接。
+    
+    功能说明：
+    - 使用多重启发式策略从页面中识别和提取卡面详情页链接
+    - 优先在"追加カード"区域查找，然后在卡面展示区域查找
+    - 通过URL模式和链接文本格式进行双重验证
+    
+    提取策略：
+    1. 查找包含"追加カード"的标题区域，在其后续兄弟元素中搜索链接
+    2. 在卡面展示区域查找包含全角括号格式［...］的卡面名称链接
+    3. 验证链接URL包含'/ensemble-star-music/<数字>'模式
+    4. 排除当前页面自身的链接，避免循环引用
+    
+    参数：
+    - soup: 已解析的页面BeautifulSoup对象
+    - base_url: 当前页面的基础URL，用于排除自引用
+    
+    返回：
+    - List[str]: 去重后的卡面详情页URL列表，最多返回10个链接
+    
+    注意：
+    - 限制返回数量避免过长的处理时间
+    - 保持链接顺序，优先返回页面中较早出现的链接
     """
     urls: List[str] = []
+    # 从基础URL中提取ID，用于排除自引用
     base_id = re.search(r"ensemble-star-music/(\d+)", base_url)
     base_id_str = base_id.group(1) if base_id else None
 
-    # Look for the "追加カード" section which contains the card links
+    # 策略1：查找"追加カード"区域中的卡面链接
     section = soup.find(lambda t: t.name in {"h2", "h3", "div", "section"} and "追加カード" in t.get_text("\n", strip=True))
     anchors: List[Tuple[str, str]] = []
     
     if section:
-        # Find the next elements after the "追加カード" heading
+        # 在"追加カード"标题后的兄弟元素中查找链接
         cur = section
-        for _ in range(20):
+        for _ in range(20):  # 限制搜索范围，避免过度遍历
             cur = cur.find_next_sibling()
             if not cur:
                 break
             txt = cur.get_text("\n", strip=True)
-            # Stop at next major section
+            # 遇到下一个主要区域时停止搜索
             if any(k in txt for k in ["ボーナス効果", "スカウトの確率について", "SCRカラーについて"]):
                 break
+            # 收集当前元素中的所有链接
             for a in cur.find_all('a', href=True):
                 anchors.append((a['href'], a.get_text(strip=True)))
     
-    # Also check for direct links in the card display area
+    # 策略2：在卡面展示区域查找直接链接
     card_display_area = soup.find('div', class_=lambda x: x and 'card' in x.lower()) or soup
     for a in card_display_area.find_all('a', href=True):
         text = a.get_text(strip=True)
-        # Look for card names with bracket format in the link text
+        # 查找包含全角括号格式的卡面名称链接
         if re.search(r"\uFF3B[^\uFF3D]+\uFF3D", text):
             anchors.append((a['href'], text))
 
+    # 验证和过滤链接
     for href, text in anchors:
+        # 必须包含ensemble-star-music路径
         if 'ensemble-star-music/' not in href:
             continue
+        # 提取URL中的数字ID
         m = re.search(r"ensemble-star-music/(\d+)", href)
         if not m:
             continue
         card_id = m.group(1)
+        # 排除空ID或与当前页面相同的ID
         if not card_id or card_id == base_id_str:
             continue
         
-        # Accept links that have bracketed card names
+        # 验证链接文本包含全角括号格式的卡面名称
         has_bracket = re.search(r"\uFF3B[^\uFF3D]+\uFF3D", text)
         
         if not has_bracket:
             continue
             
-        # Normalize absolute URL
+        # 规范化为绝对URL
         if href.startswith('http'):
             urls.append(href)
         else:
             urls.append('https://gamerch.com/' + href.lstrip('/'))
     
-    # Deduplicate preserving order and cap to 10 for targeted extraction
+    # 去重并保持顺序，限制返回数量以优化性能
     seen = set()
     dedup: List[str] = []
     for u in urls:
         if u not in seen:
             seen.add(u)
             dedup.append(u)
-            if len(dedup) >= 10:
+            if len(dedup) >= 10:  # 限制最多10个链接，避免过长处理时间
                 break
     return dedup
 
 
 def parse_card_name(html: str) -> str:
+    """
+    从页面HTML中解析并提取卡面名称。
+    
+    功能说明：
+    - 使用多级回退策略从不同位置提取卡面名称
+    - 优先使用Open Graph标签，然后是H1标题，最后是页面标题
+    - 对包含全角括号格式的卡面名称进行特殊处理和规范化
+    
+    提取优先级：
+    1. og:title meta标签（最准确，通常包含完整卡面信息）
+    2. H1标题元素（页面主标题）
+    3. HTML title标签（页面标题，作为最后备选）
+    
+    参数：
+    - html: 页面的HTML内容字符串
+    
+    返回：
+    - str: 解析得到的卡面名称，如果无法解析则返回空字符串
+    
+    名称格式处理：
+    - 识别并规范化全角括号格式：［卡面类型］角色名
+    - 去除多余的分隔符和空白字符
+    - 保持原始的日文格式
+    """
     soup = BeautifulSoup(html, "lxml")
-    # Prefer og:title
+    
+    # 优先策略：使用Open Graph标题（最准确）
     og = soup.find("meta", attrs={"property": "og:title"})
     if og and og.get("content"):
         title = og["content"].strip()
-        # Try to extract bracketed card name
+        # 尝试提取全角括号格式的卡面名称：［...］ 名称
         m = re.search(r"\uFF3B([^\uFF3D]+)\uFF3D\s*([^\-|]+)", title)  # ［...］ Name
         if m:
+            # 规范化格式：［卡面类型］角色名
             return f"［{m.group(1).strip()}］{m.group(2).strip()}"
         return title
-    # Fallback to h1
+    
+    # 回退策略1：使用H1标题元素
     h1 = soup.find("h1")
     if h1:
         return h1.get_text(strip=True)
-    # Last resort: page title
+    
+    # 回退策略2：使用页面title标签（最后备选）
     if soup.title and soup.title.string:
         t = soup.title.string.strip()
+        # 同样尝试提取全角括号格式
         m = re.search(r"\uFF3B([^\uFF3D]+)\uFF3D\s*([^\-|]+)", t)
         if m:
             return f"［{m.group(1).strip()}］{m.group(2).strip()}"
         return t
+    
+    # 无法解析时返回空字符串
     return ""
 
 
 def extract_cards_from_directory(html: str, base_url: str) -> List[Tuple[str, str]]:
-    """Extract card detail links and event names from yearly event directory page for target dates.
-    Target dates: 10th, 14th, 15th, 25th, month-end (30th/31st), day before month-end (29th/30th)
-    Returns: List of (card_url, event_name) tuples
+    """
+    从年度活动目录页面提取特定日期的卡面详情链接和活动名称。
+    
+    功能说明：
+    - 针对特定目标日期（10日、14日、15日、25日、月末等）提取卡面信息
+    - 使用双重策略：优先从标题区域提取，回退到表格/容器中查找
+    - 动态提取实际活动名称，而非使用固定模板
+    - 支持全年度日期覆盖（2024年1月-12月）
+    
+    目标日期策略：
+    - 重点日期：10日、14日、15日、25日
+    - 月末日期：30日/31日（根据月份调整）
+    - 月末前一日：29日/30日（避免遗漏）
+    
+    提取策略：
+    1. 标题策略：查找包含日期的H2/H3标题，提取其下方的卡面链接
+    2. 容器策略：在表格单元格或div容器中查找日期和相关卡面
+    3. 活动名动态提取：从上下文中识别实际活动名称
+    
+    参数：
+    - html: 年度目录页面的HTML内容
+    - base_url: 基础URL（用于链接规范化）
+    
+    返回：
+    - List[Tuple[str, str]]: (卡面URL, 活动名称) 元组列表
+    
+    卡面识别条件：
+    - URL包含 'ensemble-star-music/' 且以数字结尾
+    - 文本以全角括号开头：［...］
+    - 排除列表页面（包含'一覧'或'カード一覧'）
+    - 卡面名称长度合理（>10字符）
     """
     soup = BeautifulSoup(html, "lxml")
     
     def is_target_date(day: int, month: int) -> bool:
-        """Check if the given day is a target date"""
+        """
+        检查给定日期是否为目标提取日期。
+        
+        目标日期包括：
+        - 固定重点日期：10日、14日、15日、25日
+        - 月末及月末前一日（根据月份天数调整）
+        """
+        # 固定的重点日期
         if day in [10, 14, 15, 25]:
             return True
-        # Check for month-end and day before month-end
-        if month in [1, 3, 5, 7, 8, 10, 12]:  # 31-day months
+        
+        # 根据月份检查月末和月末前一日
+        if month in [1, 3, 5, 7, 8, 10, 12]:  # 31天的月份
             return day in [30, 31]
-        elif month in [4, 6, 9, 11]:  # 30-day months
+        elif month in [4, 6, 9, 11]:  # 30天的月份
             return day in [29, 30]
-        elif month == 2:  # February (assume non-leap year)
+        elif month == 2:  # 2月（假设非闰年）
             return day in [27, 28]
         return False
     
     def find_cards_by_date_with_dynamic_event_names(date_pattern: str) -> List[Tuple[str, str]]:
-        """Find card links by date and dynamically extract the actual event names"""
+        """
+        根据日期模式查找卡面链接并动态提取实际活动名称。
+        
+        使用双重策略：
+        1. 标题策略：在H2/H3标题中查找日期，提取标题下方的卡面
+        2. 容器策略：在表格或div容器中查找日期和相关卡面
+        """
         cards = []
         
-        # Strategy 1: Look for h2/h3 headers that contain the date pattern
+        # 策略1：在H2/H3标题中查找包含日期模式的标题
         headers = soup.find_all(['h2', 'h3'], string=re.compile(date_pattern))
         
         print(f"  查找日期模式 '{date_pattern}': 在标题中找到 {len(headers)} 个匹配")
@@ -231,21 +302,21 @@ def extract_cards_from_directory(html: str, base_url: str) -> List[Tuple[str, st
             header_text = header.get_text(strip=True)
             print(f"    标题: {header_text}")
             
-            # Extract event name from header
+            # 从标题文本中提取实际活动名称
             actual_event_name = extract_event_name_from_context(header_text, date_pattern)
             
-            # Find the next sibling elements until we hit another header
+            # 遍历标题后的兄弟元素，直到遇到下一个同级或更高级标题
             current = header.next_sibling
             section_cards = []
             
             while current:
-                # Stop if we hit another header of the same or higher level
+                # 如果遇到同级或更高级标题则停止
                 if (hasattr(current, 'name') and 
                     current.name in ['h1', 'h2', 'h3'] and 
                     current != header):
                     break
                 
-                # Look for card links in this element
+                # 在当前元素中查找卡面链接
                 if hasattr(current, 'find_all'):
                     card_links = current.find_all('a', href=True)
                     
@@ -253,15 +324,15 @@ def extract_cards_from_directory(html: str, base_url: str) -> List[Tuple[str, st
                         href = link.get('href', '')
                         text = link.get_text(strip=True)
                         
-                        # Check if this is a card link
+                        # 检查是否为有效的卡面链接
                         if ('ensemble-star-music/' in href and 
                             re.search(r'/\d+$', href) and 
                             text.startswith('［') and '］' in text and
-                            len(text) > 10 and  # Card names are usually longer
-                            not text.endswith('一覧') and  # Exclude list pages
-                            'カード一覧' not in text):  # Exclude card list pages
+                            len(text) > 10 and  # 卡面名称通常较长
+                            not text.endswith('一覧') and  # 排除列表页面
+                            'カード一覧' not in text):  # 排除卡面一览页面
                             
-                            # Normalize URL
+                            # 规范化URL格式
                             if href.startswith('http'):
                                 card_url = href
                             else:
@@ -271,18 +342,18 @@ def extract_cards_from_directory(html: str, base_url: str) -> List[Tuple[str, st
                 
                 current = current.next_sibling
             
-            # Add all found cards with their actual event names
+            # 将找到的卡面及其实际活动名称添加到结果中
             for card_url, event_name, card_text in section_cards:
                 cards.append((card_url, event_name))
             
             if section_cards:
                 print(f"    在标题 '{actual_event_name}' 区域找到 {len(section_cards)} 个卡面")
         
-        # Strategy 2: If no headers found, look for date in table cells or divs
+        # 策略2：如果在标题中未找到，则在表格单元格或div中查找
         if not cards:
             print(f"  未在标题中找到，尝试在表格和div中查找...")
             
-            # Find all elements containing the date
+            # 查找所有包含日期的元素
             date_elements = soup.find_all(string=re.compile(date_pattern))
             
             for date_elem in date_elements:
@@ -640,17 +711,42 @@ def extract_additional_cards_from_listing(soup: BeautifulSoup) -> List[Dict[str,
 
 
 def extract_basic_info(soup: BeautifulSoup) -> Dict[str, str]:
+    """
+    从卡面详情页面提取基本信息。
+    
+    功能说明：
+    - 提取卡面的稀有度、类型/属性、粉丝上限、追加日期等基础信息
+    - 使用多重策略：优先从"基本情報"区块提取，回退到全页面文本搜索
+    - 支持表格式和文本式两种信息布局
+    
+    提取策略：
+    1. 区块策略：查找包含"基本情報"的标题区块及其后续内容
+    2. 标签策略：通过标签-值对的形式提取信息
+    3. 正则策略：使用正则表达式从文本中匹配特定格式的信息
+    
+    参数：
+    - soup: 卡面详情页面的BeautifulSoup对象
+    
+    返回：
+    - Dict[str, str]: 包含基本信息的字典，键为日文字段名
+    
+    提取字段：
+    - レアリティ: 稀有度（如☆5、☆4等）
+    - タイプ/属性: 卡面类型和属性
+    - ファン上限: 粉丝数量上限
+    - 追加日: 卡面添加到游戏的日期
+    """
     info = {
         "レアリティ": "",
         "タイプ/属性": "",
         "ファン上限": "",
         "追加日": "",
     }
-    # Find a block that contains 基本情報
+    # 查找包含"基本情報"的区块
     block = soup.find(lambda t: t.name in {"h2", "h3", "div", "section"} and "基本情報" in t.get_text("\n", strip=True))
     text = ""
     if block:
-        # Gather some siblings to include actual content
+        # 收集区块及其后续兄弟元素的内容
         texts = [block.get_text("\n", strip=True)]
         sib = block.find_next_sibling()
         for _ in range(5):
@@ -660,33 +756,35 @@ def extract_basic_info(soup: BeautifulSoup) -> Dict[str, str]:
             sib = sib.find_next_sibling()
         text = "\n".join(texts)
     else:
-        # Broader text search
+        # 回退到全页面文本搜索
         text = soup.get_text("\n", strip=True)
 
-    # Try table-like label-value extraction
+    # 尝试表格式标签-值提取
     def find_label(label: str) -> str:
+        """查找指定标签对应的值"""
         tag = soup.find(string=re.compile(label))
         if tag:
             parent = getattr(tag, 'parent', None)
             if parent:
-                # Same-line value
+                # 同行值提取
                 full = parent.get_text("\n", strip=True)
                 m = re.search(label + r"\s*([^\n]+)", full)
                 if m:
                     return m.group(1).strip()
-                # Next sibling value
+                # 下一个兄弟元素值提取
                 for sib in parent.find_next_siblings():
                     val = sib.get_text("\n", strip=True)
                     if val:
                         return val
         return ""
 
+    # 使用标签查找函数提取各字段
     info["レアリティ"] = info["レアリティ"] or find_label("レアリティ")
     info["タイプ/属性"] = info["タイプ/属性"] or find_label("タイプ/属性")
     info["ファン上限"] = info["ファン上限"] or find_label("ファン上限")
     info["追加日"] = info["追加日"] or find_label("追加日")
 
-    # Simple regex extractions
+    # 使用正则表达式进行简单提取（作为备选方案）
     m = re.search(r"レアリティ\s*([☆★]?\d+)", text)
     if m:
         info["レアリティ"] = m.group(1)
@@ -704,8 +802,33 @@ def extract_basic_info(soup: BeautifulSoup) -> Dict[str, str]:
 
 
 def extract_status(soup: BeautifulSoup) -> Dict[str, Dict[str, str]]:
+    """
+    从卡面详情页面提取状态数值表格。
+    
+    功能说明：
+    - 提取卡面的各种状态数值（总合值、Da、Vo、Pf）
+    - 支持多个状态阶段：初期值、无凸MAX值、完凸MAX值
+    - 自动识别表格结构并解析列标题和行标题
+    
+    数据结构：
+    - status[列][行] = 值
+    - 例如：status['初期値']['総合値'] = '23510'
+    
+    参数：
+    - soup: 卡面详情页面的BeautifulSoup对象
+    
+    返回：
+    - Dict[str, Dict[str, str]]: 嵌套字典，外层键为状态阶段，内层键为状态类型
+    
+    状态类型：
+    - 総合値: 总合数值
+    - Da: Dance数值
+    - Vo: Vocal数值  
+    - Pf: Performance数值
+    """
     # status[列][行] = 値  e.g., status['初期値']['総合値'] = '23510'
     status: Dict[str, Dict[str, str]] = {}
+    # 查找包含状态数值的目标表格
     target_table = None
     for table in soup.find_all("table"):
         t = table.get_text("\n", strip=True)
@@ -715,12 +838,12 @@ def extract_status(soup: BeautifulSoup) -> Dict[str, Dict[str, str]]:
     if not target_table:
         return status
 
-    # Extract column headers (初期値 / 無凸MAX値 / 完凸MAX値)
+    # 提取列标题（初期値 / 無凸MAX値 / 完凸MAX値）
     columns: List[str] = []
     for tr in target_table.find_all("tr"):
         cells = [c.get_text(strip=True) for c in tr.find_all(["th", "td"])]
         if any(x in cells for x in ["初期値", "無凸MAX値", "完凸MAX値"]):
-            # First cell likely row header placeholder
+            # 第一个单元格通常是行标题占位符
             if len(cells) >= 2:
                 columns = [c for c in cells[1:] if c]
             break
@@ -728,15 +851,19 @@ def extract_status(soup: BeautifulSoup) -> Dict[str, Dict[str, str]]:
         columns = ["初期値", "無凸MAX値", "完凸MAX値"]
 
     def as_num(s: str) -> str:
+        """数值格式化：移除逗号、横线并去除空格"""
         s = s.replace(",", "").replace("-", "").strip()
         return s
 
+    # 遍历表格行，提取状态数值
     for tr in target_table.find_all("tr"):
         cells = [c.get_text(strip=True) for c in tr.find_all(["th", "td"])]
         if not cells:
             continue
         row_label = cells[0]
+        # 检查是否为目标状态类型
         if row_label in ["総合値", "Da", "Vo", "Pf"]:
+            # 将每列的数值填入对应的状态字典
             for idx, col in enumerate(columns):
                 if idx + 1 < len(cells):
                     status.setdefault(col, {})[row_label] = as_num(cells[idx + 1])
@@ -744,6 +871,34 @@ def extract_status(soup: BeautifulSoup) -> Dict[str, Dict[str, str]]:
 
 
 def extract_skills(soup: BeautifulSoup) -> Dict[str, Dict[str, str]]:
+    """
+    从卡面详情页面提取技能信息。
+    
+    功能说明：
+    - 提取中央技能（センタースキル）的名称和效果
+    - 提取Live技能（ライブスキル）的名称和效果  
+    - 提取支援技能（サポートスキル）的效果
+    - 使用多种策略确保技能信息的完整提取
+    
+    提取策略：
+    1. 正则表达式匹配：优先使用模式匹配提取技能名称
+    2. 逐行扫描：在正则失败时逐行查找技能信息
+    3. 全文搜索：作为最后的备选方案进行上下文搜索
+    4. DOM结构解析：通过HTML标签结构定位技能效果
+    
+    参数：
+    - soup: 卡面详情页面的BeautifulSoup对象
+    
+    返回：
+    - Dict[str, Dict[str, str]]: 技能信息字典
+      - 外层键：技能类型（センタースキル、ライブスキル、サポートスキル）
+      - 内层键：技能属性（名前、効果）
+    
+    技能类型：
+    - センタースキル: 中央技能，包含名前和効果
+    - ライブスキル: Live技能，包含名前和効果
+    - サポートスキル: 支援技能，仅包含効果
+    """
     skills = {
         "センタースキル": {"名称": "", "効果": ""},
         "ライブスキル": {"名称": "", "効果": ""},
@@ -752,39 +907,39 @@ def extract_skills(soup: BeautifulSoup) -> Dict[str, Dict[str, str]]:
 
     full_text = soup.get_text("\n", strip=True)
     
-    # Narrow to skills section when possible
+    # 尽可能缩小到技能部分的文本范围
     section_start = full_text.find("センター/ライブ/サポートスキル")
     skills_text = full_text
     if section_start != -1:
         skills_text = full_text[section_start:]
-        # Cut at next major section, but be more conservative to preserve support skill content
+        # 在下一个主要部分处截断，但保守处理以保留支援技能内容
         for marker in ["アイドルロード", "必要素材数"]:
             idx = skills_text.find(marker)
             if idx != -1:
                 skills_text = skills_text[:idx]
                 break
-        # Only cut at スカウト画面 if it's far enough from サポートスキル
+        # 只有当スカウト画面距离サポートスキル足够远时才截断
         scout_idx = skills_text.find("スカウト画面")
         support_idx = skills_text.find("サポートスキル")
         if scout_idx != -1 and support_idx != -1 and scout_idx - support_idx > 200:
             skills_text = skills_text[:scout_idx]
 
-    # Center skill: prefer explicit name format then fallback to line scanning
+    # 中央技能：优先使用明确的名称格式，然后回退到逐行扫描
     center_name = ""
     center_eff = ""
 
-    # Strategy 1: Look for center skill name in quotes format
+    # 策略1：查找引号格式的中央技能名称
     center_name_match = re.search(r'センタースキル[^「]*「([^」]+)」', skills_text)
     if center_name_match:
         center_name = center_name_match.group(1)
     else:
-        # Strategy 1b: Line-by-line scanning for center skill name
+        # 策略1b：逐行扫描中央技能名称
         lines = skills_text.splitlines()
         for i, line in enumerate(lines):
             line = line.strip()
             if "センタースキル" in line:
-                # Look for the next non-empty line that could be a skill name
-                for j in range(i + 1, min(i + 4, len(lines))):  # Check next 3 lines
+                # 查找下一个可能是技能名称的非空行
+                for j in range(i + 1, min(i + 4, len(lines))):  # 检查接下来的3行
                     potential_name = lines[j].strip()
                     if (potential_name and 
                         not re.search(r'効果|項目|％|up|UP|固定', potential_name) and
@@ -792,7 +947,7 @@ def extract_skills(soup: BeautifulSoup) -> Dict[str, Dict[str, str]]:
                         center_name = potential_name
                         break
 
-        # Strategy 2: Look for known skill names in the full page text
+        # 策略2：在全页文本中查找已知的技能名称
         if not center_name:
             # Search in the full page text instead of just skills_text
             lines = full_text.splitlines()
@@ -896,16 +1051,44 @@ def extract_skills(soup: BeautifulSoup) -> Dict[str, Dict[str, str]]:
 
 
 def extract_road_items(soup: BeautifulSoup) -> str:
-    # First, always search the entire page for room costumes and other items
+    """
+    从卡面详情页面提取アイドルロード（偶像之路）可获得的道具和物品。
+    
+    功能说明：
+    - 提取ルーム衣装（房间服装）、MV衣装、SPP、技能、背景等道具
+    - 使用多种策略确保完整提取：正则表达式、DOM结构解析、文本块分析
+    - 处理跨行分割的物品名称和特殊格式
+    - 自动去重并保持提取顺序
+    
+    提取策略：
+    1. 正则表达式全页搜索：优先使用模式匹配提取各类物品
+    2. DOM结构解析：通过HTML标签结构定位物品列表
+    3. 文本块分析：在标题间提取物品内容
+    4. 逐行扫描：作为最后备选方案进行鲁棒性提取
+    
+    参数：
+    - soup: 卡面详情页面的BeautifulSoup对象
+    
+    返回：
+    - str: 以分号分隔的物品列表字符串
+    
+    物品类型：
+    - ルーム衣装: 房间装饰用服装
+    - MV衣装: 音乐视频用服装
+    - SPP: 特殊技能点数道具
+    - ライブスキル/サポートスキル: 技能道具
+    - 背景: 背景装饰物品
+    """
+    # 首先，始终在整个页面中搜索房间服装和其他物品
     text = soup.get_text("\n", strip=True)
     items: List[str] = []
     
-    # Extract room costumes from entire page (handle multi-line format)
+    # 从整个页面提取房间服装（处理多行格式）
     room_costume_matches = re.findall(r"ルーム衣装「([^」]+)」", text)
     for costume in room_costume_matches:
         items.append(f"ルーム衣装「{costume}」")
     
-    # Also handle cases where room costume is split across lines
+    # 同时处理房间服装跨行分割的情况
     lines = text.splitlines()
     for i, line in enumerate(lines):
         line = line.strip()
@@ -916,31 +1099,31 @@ def extract_road_items(soup: BeautifulSoup) -> str:
                 costume = costume_match.group(1)
                 items.append(f"ルーム衣装「{costume}」")
     
-    # Extract MV costumes (but not promotional ones)
+    # 提取MV服装（但不包括促销类型）
     mv_costume_matches = re.findall(r"MV衣装「([^」]+)」(?!プレゼント)", text)
     for costume in mv_costume_matches:
         items.append(f"MV衣装「{costume}」")
     
-    # Extract SPP
+    # 提取SPP道具
     spp_matches = re.findall(r"SPP「([^」]+)」", text)
     for spp in spp_matches:
         items.append(f"SPP「{spp}」")
     
-    # Extract skills
+    # 提取技能道具
     skill_matches = re.findall(r"(ライブスキル「[^」]+」|サポートスキル「[^」]+」)", text)
     for skill in skill_matches:
         items.append(skill)
     
-    # Extract backgrounds
+    # 提取背景道具
     bg_matches = re.findall(r"背景「([^」]+)」", text)
     for bg in bg_matches:
         items.append(f"背景「{bg}」")
     
-    # Try DOM-based extraction as backup
+    # 尝试基于DOM的提取作为备选方案
     heading = soup.find(lambda t: t.name in {"h2", "h3", "div", "section"} and "取得できるスキル/アイテム" in t.get_text("\n", strip=True))
     if heading and not items:
         cur = heading
-        # Walk siblings to capture lists and paragraphs
+        # 遍历兄弟元素以捕获列表和段落
         for i in range(20):
             cur = cur.find_next_sibling()
             if not cur:
@@ -950,7 +1133,7 @@ def extract_road_items(soup: BeautifulSoup) -> str:
                 continue
             if any(k in txt for k in ["必要素材数", "IRマス詳細", "合計ステータス", "横にスクロール"]):
                 break
-            # collect meaningful lines
+            # 收集有意义的行
             for ln in txt.splitlines():
                 ln = ln.strip()
                 if not ln:
@@ -958,7 +1141,7 @@ def extract_road_items(soup: BeautifulSoup) -> str:
                 if re.search(r"(スキル|ピース|アイテム|MV|ルーム衣装|SPP|背景|ボイス)", ln):
                     items.append(ln)
     
-    # Fallback: text block between headings
+    # 备选方案：标题间的文本块
     if not items:
         m = re.search(r"取得できるスキル/アイテム\n([\s\S]+?)(?:必要素材数|IRマス詳細|合計ステータス|横にスクロール|$)", text)
         if m:
@@ -968,15 +1151,15 @@ def extract_road_items(soup: BeautifulSoup) -> str:
                 if re.search(r"(スキル|ピース|アイテム|MV|ルーム衣装|SPP|背景|ボイス)", ln):
                     items.append(ln)
     
-    # Last resort: robust line scanning with better SPP handling
+    # 最后手段：鲁棒的逐行扫描，更好地处理SPP
     if not items:
         lines = text.splitlines()
         for i, ln in enumerate(lines):
             ln = ln.strip()
             if re.match(r"^(ライブスキル「.+」|サポートスキル「.+」|MV衣装.+|ルーム衣装.+|SPP.+)$", ln):
-                # Special handling for SPP lines that might be split
+                # 对可能分割的SPP行进行特殊处理
                 if ln.startswith("SPP「") and not ln.endswith("」"):
-                    # Look for the closing quote in the next few lines
+                    # 在接下来的几行中查找结束引号
                     full_spp = ln
                     for j in range(i + 1, min(i + 3, len(lines))):
                         next_line = lines[j].strip()
@@ -987,7 +1170,7 @@ def extract_road_items(soup: BeautifulSoup) -> str:
                 else:
                     items.append(ln)
     
-    # Remove duplicates while preserving order
+    # 去重同时保持顺序
     seen = set()
     unique_items = []
     for item in items:
@@ -999,6 +1182,27 @@ def extract_road_items(soup: BeautifulSoup) -> str:
 
 
 def build_row(card_name: str, basic: Dict[str, str], status: Dict[str, Dict[str, str]], skills: Dict[str, Dict[str, str]], road_items: str) -> Dict[str, str]:
+    """
+    汇总并构建原始解析行（日文键），供后续模板映射使用。
+    
+    作用：
+    - 将页面解析得到的基础信息 `basic`、属性数值 `status`、技能信息 `skills` 以及棋盘产出 `road_items`
+      统一汇总为一行标准字典，键采用与页面一致的日文字段，后续由 `map_to_template` 进行中日字段映射。
+    
+    参数：
+    - card_name: 卡面中文名或页面标题解析到的卡面名。
+    - basic: 基础信息字典（如「レアリティ」「タイプ/属性」「ファン上限」「追加日」）。
+    - status: 属性数值字典，包含「初期値」「無凸MAX値」「完凸MAX値」三段下的各项（Da/Vo/Pf/総合値）。
+    - skills: 技能信息字典，包含「センタースキル」「ライブスキル」「サポートスキル」的名称与效果。
+    - road_items: 棋盘可获得的道具/衣装/SPP/背景聚合字符串（通常为 `extract_road_items` 的输出）。
+    
+    返回：
+    - Dict[str, str]: 以日文键为主的标准行数据，用于后续模板列映射。
+    
+    设计说明：
+    - 字段缺失时统一回退为空字符串，避免后续写表阶段出现 NaN/None。
+    - 数值优先保持原始结构，不在此阶段做“一卡/满破”选择，交由模板映射阶段处理。
+    """
     
     row = {
         "卡面名称": card_name,
@@ -1031,14 +1235,36 @@ def build_row(card_name: str, basic: Dict[str, str], status: Dict[str, Dict[str,
 
 
 def map_to_template(row: Dict[str, str], columns_order: List[str], use_initial_stats: bool = False) -> Dict[str, str]:
-    """Map parsed row (Japanese keys) to template columns (Chinese keys).
-    
-    Args:
-        row: The parsed row data
-        columns_order: The column order from template
-        use_initial_stats: If True, use 無凸MAX値 for stats (一卡); if False, prefer 完凸MAX値 (満破)
     """
-    # Determine card rarity
+    将解析行（日文键）映射到模板列（中文键）。
+    
+    功能说明：
+    - 将日文字段键转换为中文模板列名
+    - 根据卡面稀有度智能选择显示的数值和技能
+    - 处理特殊卡面的衣装和道具逻辑
+    - 解析技能等级效果和道具分类
+    
+    映射策略：
+    1. 稀有度识别：根据レアリティ字段和卡面名称判断星级
+    2. 数值选择：3-4星卡不显示数值，5星卡根据参数选择一卡/满破数值
+    3. 技能处理：3星卡隐藏技能，解析Live技能Lv5和Support技能Lv3
+    4. 道具分类：将道具字符串分解为MV衣装、房间衣装、背景、SPP等类别
+    5. 特殊处理：针对特定卡面（如アンビバレンス HiMERU）的特殊逻辑
+    
+    参数：
+    - row: 解析得到的行数据（日文键）
+    - columns_order: 模板列顺序
+    - use_initial_stats: True时使用無凸MAX値（一卡），False时优先使用完凸MAX値（満破）
+    
+    返回：
+    - Dict[str, str]: 映射后的行数据（中文键），按模板列顺序
+    
+    数值选择逻辑：
+    - 3-4星卡：不显示任何数值
+    - 5星卡一卡模式：仅使用無凸MAX値
+    - 5星卡满破模式：优先完凸MAX値，回退到無凸MAX値，最后回退到初期値
+    """
+    # 确定卡面稀有度
     rarity = row.get("レアリティ", "").strip()
     card_name = row.get("卡面名称", "")
     is_5_star = rarity == "☆5" or "☆5" in card_name or "★5" in card_name
@@ -1046,18 +1272,19 @@ def map_to_template(row: Dict[str, str], columns_order: List[str], use_initial_s
     is_3_star = rarity == "☆3" or "☆3" in card_name or "★3" in card_name
     
     def pick_stat(key: str) -> str:
-        # For 3-star and 4-star cards, don't show stats
+        """根据稀有度和模式选择合适的数值"""
+        # 3星和4星卡不显示数值
         if is_3_star or is_4_star:
             return ""
             
         if use_initial_stats:
-            # For initial stats (一卡), only use 無凸MAX値, don't fallback to 初期値
+            # 一卡模式：仅使用無凸MAX値，不回退到初期値
             return (
                 row.get(f"無凸MAX値 {key}")
                 or ""
             )
         else:
-            # For max stats (満破), prefer 完凸MAX値 then 無凸MAX値 then 初期値
+            # 满破模式：优先完凸MAX値，然后無凸MAX値，最后初期値
             return (
                 row.get(f"完凸MAX値 {key}")
                 or row.get(f"無凸MAX値 {key}")
@@ -1065,24 +1292,24 @@ def map_to_template(row: Dict[str, str], columns_order: List[str], use_initial_s
                 or ""
             )
 
-    # Parse live Lv5 from combined effect
+    # 从组合效果中解析Live技能Lv5
     live_eff = row.get("ライブスキル 効果", "") or ""
     m_lv5 = re.search(r"Lv\.5：([^/\n]+)", live_eff)
     live_lv5 = m_lv5.group(1).strip() if m_lv5 else ""
 
-    # Parse support Lv3 from combined effect
+    # 从组合效果中解析Support技能Lv3
     sup_eff = row.get("サポートスキル 効果", "") or ""
     m_lv3 = re.search(r"Lv\.3：([^/\n]+)", sup_eff)
     sup_lv3 = m_lv3.group(1).strip() if m_lv3 else ""
 
-    # Split road items
+    # 分割道具项目
     mv_items: List[str] = []
     room_items: List[str] = []
     bg_items: List[str] = []
     spp_tracks: List[str] = []
     road_items = row.get("取得できるスキル/アイテム", "") or ""
     
-    # Try different separators
+    # 尝试不同的分隔符
     separators = ["；", "/", " / "]
     items = []
     for sep in separators:
@@ -1092,27 +1319,28 @@ def map_to_template(row: Dict[str, str], columns_order: List[str], use_initial_s
     else:
         items = [road_items] if road_items else []
     
-    # Check if this is the アンビバレンス HiMERU card
+    # 检查是否为アンビバレンス HiMERU特殊卡面
     card_name = row.get("卡面名称", "")
     is_ambivalence_himeru = "裏表アンビバレンス" in card_name and "HiMERU" in card_name
     
+    # 遍历道具项目进行分类
     for it in items:
         it = it.strip()
         if not it:
             continue
         
-        # Extract MV costume names - all star levels can have MV costumes
+        # 提取MV衣装名称 - 所有星级都可能有MV衣装
         if "MV衣装" in it:
             if "「" in it and "」" in it:
-                # Extract costume name from quotes: MV衣装「アンビバレンス衣装」
+                # 从引号中提取衣装名称: MV衣装「アンビバレンス衣装」
                 costume_match = re.search(r"MV衣装「([^」]+)」", it)
                 if costume_match:
                     costume_name = costume_match.group(1)
-                    # Skip if it's a promotional item (プレゼント)
+                    # 跳过促销物品（プレゼント）
                     if "プレゼント" not in it:
-                        # Special handling for アンビバレンス HiMERU card
+                        # アンビバレンス HiMERU卡面的特殊处理
                         if is_ambivalence_himeru:
-                            # Only keep the base アンビバレンス衣装, not variants
+                            # 只保留基础的アンビバレンス衣装，不包括变体
                             if costume_name == "アンビバレンス衣装":
                                 if costume_name not in mv_items:
                                     mv_items.append(costume_name)
@@ -1120,14 +1348,14 @@ def map_to_template(row: Dict[str, str], columns_order: List[str], use_initial_s
                             if costume_name not in mv_items:
                                 mv_items.append(costume_name)
             elif not ("一覧" in it or "リンク" in it or "あり" in it or "付き" in it or "プレゼント" in it or "ピース" in it):
-                # Only include if it's not a generic description or costume piece
-                if not is_ambivalence_himeru:  # Skip for special case
+                # 只包含非通用描述或衣装碎片的项目
+                if not is_ambivalence_himeru:  # 特殊情况跳过
                     mv_items.append(it)
         
-        # Extract room costume names
+        # 提取房间衣装名称
         elif "ルーム衣装" in it or "房间衣装" in it:
             if "「" in it and "」" in it:
-                # Extract costume name from quotes
+                # 从引号中提取衣装名称
                 costume_match = re.search(r"(?:ルーム衣装|房间衣装)「([^」]+)」", it)
                 if costume_match:
                     costume_name = costume_match.group(1)
@@ -1136,7 +1364,7 @@ def map_to_template(row: Dict[str, str], columns_order: List[str], use_initial_s
             elif not ("一覧" in it or "リンク" in it or "あり" in it):
                 room_items.append(it)
         
-        # Extract background names
+        # 提取背景名称
         elif "背景" in it:
             if "「" in it and "」" in it:
                 bg_match = re.search(r"背景「([^」]+)」", it)
@@ -1147,7 +1375,7 @@ def map_to_template(row: Dict[str, str], columns_order: List[str], use_initial_s
             elif not ("一覧" in it or "リンク" in it):
                 bg_items.append(it)
         
-        # Extract SPP track names
+        # 提取SPP轨道名称
         elif "SPP" in it:
             if "「" in it and "」" in it:
                 spp_match = re.search(r"SPP「([^」]+)」", it)
@@ -1158,57 +1386,58 @@ def map_to_template(row: Dict[str, str], columns_order: List[str], use_initial_s
             elif not ("一覧" in it or "リンク" in it or "あり" in it) and len(it) > 3:
                 spp_tracks.append(it)
 
-    # Special handling for アンビバレンス HiMERU card
+    # アンビバレンス HiMERU卡面的特殊处理
     if is_ambivalence_himeru:
-        # Ensure both MV and room costumes are アンビバレンス衣装
+        # 确保MV和房间衣装都是アンビバレンス衣装
         if "アンビバレンス衣装" not in mv_items:
             mv_items = ["アンビバレンス衣装"]
         else:
-            mv_items = ["アンビバレンス衣装"]  # Only keep the base costume
+            mv_items = ["アンビバレンス衣装"]  # 只保留基础衣装
         
         if "アンビバレンス衣装" not in room_items:
             room_items = ["アンビバレンス衣装"]
 
-    # Card name with star suffix
+    # 卡面名称加星级后缀
     name = row.get("卡面名称", "")
     rarity = (row.get("レアリティ", "") or "").strip()
     if rarity and not rarity.startswith("☆"):
-        # Normalize e.g. '5' -> '☆5'
+        # 标准化格式，例如 '5' -> '☆5'
         if re.match(r"^\d+$", rarity):
             rarity = f"☆{rarity}"
     if name and rarity:
         name = f"{name} {rarity}"
 
-    # Set the status indicator for 5-star cards
+    # 为5星卡设置状态指示器
     status_indicator = ""
     if use_initial_stats:
         status_indicator = "一卡"
     else:
-        # Check if this could be a 5-star card that would have dual rows
+        # 检查是否为可能有双行的5星卡
         if is_5_star:
             status_indicator = "满破"
 
-    # For 3-star cards, hide center技能, live技能(lv5), support技能(lv3)
+    # 对于3星卡，隐藏center技能、live技能(lv5)、support技能(lv3)
     center_skill = "" if is_3_star else row.get("センタースキル 効果", "")
     live_skill_lv5 = "" if is_3_star else live_lv5
     support_skill_lv3 = "" if is_3_star else sup_lv3
 
-    # Optimize MV costume selection: prefer main costume over variants
+    # 优化MV衣装选择：优先选择主衣装而非变体
     if mv_items:
-        # Look for main costume (without parentheses or special markers)
+        # 寻找主衣装（不含括号或特殊标记）
         main_costumes = []
         for costume in mv_items:
-            # Prefer costumes without parentheses (main versions)
+            # 优先选择不含括号的衣装（主版本）
             if "（" not in costume and ")" not in costume:
                 main_costumes.append(costume)
         
-        # If we found main costumes, use only the first one
+        # 如果找到主衣装，只使用第一个
         if main_costumes:
             mv_items = [main_costumes[0]]
     
-    # If no room costumes found but MV costumes exist, use MV costumes as room costumes
+    # 如果没有找到房间衣装但存在MV衣装，使用MV衣装作为房间衣装
     final_room_items = room_items if room_items else mv_items
     
+    # 构建最终的映射字典
     mapped = {
         "卡面名称": name,
         "活动名称": row.get("活动名称", "") or row.get("イベント名", ""),
@@ -1229,11 +1458,28 @@ def map_to_template(row: Dict[str, str], columns_order: List[str], use_initial_s
         "spp对应乐曲": " / ".join(spp_tracks),
         "故事": "",
     }
-    # Preserve order: only include known columns; missing -> empty
+    # 保持顺序：只包含已知列；缺失的列设为空
     return {col: mapped.get(col, "") for col in columns_order}
 
 
 def write_excel_rows(out_path: str, rows: List[Dict[str, str]], columns_order: List[str]) -> None:
+    """
+    将解析得到的行数据按模板列顺序规范化并写入 Excel 文件。
+    
+    参数：
+    - out_path: 输出的 Excel 文件路径。
+    - rows: 业务行数据列表，键为模板列（中文）或内部字段（如「イベント名」）。
+    - columns_order: 模板列顺序列表，最终写出严格遵循该列顺序。
+    
+    行为说明：
+    - 先将每一行规范为完整列集（缺失列补空字符串），避免列缺失导致写表异常。
+    - 构造 DataFrame 后，若存在活动名称/卡面名称列，则进行多列排序，提升可读性与检索效率。
+    - 对排序列的空值进行统一替换（空字符串/NaN -> "未知"），确保排序稳定性。
+    
+    注意：
+    - 排序优先级为：活动名称（中文/日文） -> 卡面名称（中文/日文）。
+    - 输出不包含索引列，适用于直接交付与前端展示。
+    """
     normalized = [{col: r.get(col, "") for col in columns_order} for r in rows]
     df = pd.DataFrame(normalized, columns=columns_order)
     
@@ -1264,414 +1510,13 @@ def write_excel_rows(out_path: str, rows: List[Dict[str, str]], columns_order: L
     df.to_excel(out_path, index=False)
 
 
-def main() -> None:
-    # Accept URL from argv or stdin, default to yearly event directory
-    if len(sys.argv) > 1 and sys.argv[1].strip():
-        url = sys.argv[1].strip()
-    else:
-        default_url = "https://gamerch.com/ensemble-star-music/895943"
-        print(f"请输入卡面页面链接（直接回车使用默认年间イベント页面: {default_url} ）:")
-        url = input().strip()
-        if not url:
-            url = default_url
-            print(f"使用默认链接: {url}")
-    
-    # 检查命令行参数以确定运行模式
-    use_multithreading = True  # 默认使用多线程
-    max_workers = 8  # 默认线程数
-    
-    # 解析命令行参数
-    if len(sys.argv) > 2:
-        for arg in sys.argv[2:]:
-            if arg == "--single-thread":
-                use_multithreading = False
-            elif arg.startswith("--threads="):
-                try:
-                    max_workers = int(arg.split("=")[1])
-                    max_workers = max(1, min(max_workers, 16))  # 限制在1-16之间
-                except ValueError:
-                    max_workers = 8
-    
-    # 如果没有命令行参数，则询问用户
-    if len(sys.argv) <= 2:
-        print("\n选择爬取模式:")
-        print("1. 单线程模式（稳定，较慢）")
-        print("2. 多线程模式（快速，推荐）")
-        mode_choice = input("请选择模式 (1/2，默认为2): ").strip()
-        use_multithreading = mode_choice != "1"
-        
-        if use_multithreading:
-            max_workers_input = input("请输入线程数 (默认为8): ").strip()
-            try:
-                max_workers = int(max_workers_input) if max_workers_input else 8
-                max_workers = max(1, min(max_workers, 16))  # 限制在1-16之间
-            except ValueError:
-                max_workers = 8
-    
-    if use_multithreading:
-        print(f"使用多线程模式，线程数: {max_workers}")
-    else:
-        print("使用单线程模式")
-    
-    try:
-        html, md = crawl_page(url)
-    except Exception as e:
-        print(f"抓取失败: {e}")
-        return
-
-    soup = BeautifulSoup(html, "lxml")
-    # Detect whether current page is a card detail page (with bracketed title)
-    preview_name = parse_card_name(html)
-    full_text = soup.get_text("\n", strip=True)
-    
-    # Check if this is a yearly event directory page
-    # More specific check: must have directory indicators AND not be a specific event page
-    has_directory_text = "年間イベント" in full_text or "イベント一覧" in full_text
-    is_known_directory_url = "/895943" in url
-    # Check if this looks like a specific event page (has specific event title patterns)
-    has_specific_event_title = bool(re.search(r"(スカウト|ガシャ|イベント).*Stage|Bright me up", full_text))
-    
-    # Only treat as directory if it has directory indicators OR is a known directory URL, 
-    # AND doesn't look like a specific event page
-    is_directory = (has_directory_text or is_known_directory_url) and not has_specific_event_title
-    
-    # Prefer text-based detection: treat as listing when typical markers are present
-    has_scout_section = any(k in full_text for k in ["スカウト追加カード", "追加カード", "スカウトの確率について", "クロススカウト・"])
-    # Detail page heuristic: only if no listing markers AND has bracketed card title
-    is_detail = not has_scout_section and not is_directory and bool(re.search(r"\uFF3B[^\uFF3D]+\uFF3D", preview_name))
-    
-    # Try to collect detail links
-    links = []
-    if is_detail:
-        links = []
-    elif is_directory:
-        # Extract card links from directory page for target dates
-        print("检测到目录页面，提取目标日期的卡面链接...")
-        links = extract_cards_from_directory(html, url)
-    else:
-        # Regular listing page
-        links = find_card_links(soup, url)
-    
-
-    
-    rows: List[Dict[str, str]] = []
-    
-    # Handle different page types
-    if is_directory:
-        # Directory page: process all found card-event pairs
-        print(f"处理目录页面，找到 {len(links)} 个卡面链接")
-        
-        if use_multithreading:
-            # 使用多线程模式处理目录页面 - 完整详情提取
-            print(f"使用多线程模式处理 {len(links)} 个卡面的完整详情...")
-            
-            # 创建多线程获取器
-            fetcher = MultiThreadedCardFetcher(
-                max_workers=max_workers,
-                timeout=15,
-                delay=0.1  # 100ms延迟避免过于频繁的请求
-            )
-            
-            # 使用新的批量完整详情提取功能
-            print("正在批量获取卡面完整详情...")
-            card_details_list = fetcher.fetch_card_full_details_batch(links)
-            
-            # 将结果添加到rows
-            rows.extend(card_details_list)
-            
-            print(f"多线程处理完成，成功提取 {len(card_details_list)} 个卡面的完整详情")
-        else:
-            # 使用单线程模式处理目录页面（原有逻辑）
-            for i, (card_url, event_name) in enumerate(links):
-                try:
-                    print(f"  处理链接 {i+1}/{len(links)}: {card_url} (活动: {event_name})")
-                    h, _ = crawl_page(card_url)
-                    sp = BeautifulSoup(h, "lxml")
-                    card_name = parse_card_name(h)
-                    
-                    # Skip profile pages and non-card pages
-                    if "プロフィール" in card_name or "詳細" in card_name:
-                        print(f"    跳过非卡面页面: {card_name}")
-                        continue
-                    
-                    # Check if this is a valid card page with bracketed name
-                    if not re.search(r"［[^］]+］", card_name):
-                        print(f"    跳过无效卡面: {card_name}")
-                        continue
-                    
-                    # Extract detailed information
-                    basic = extract_basic_info(sp)
-                    status = extract_status(sp)
-                    skills = extract_skills(sp)
-                    road_items = extract_road_items(sp)
-                    
-                    row = build_row(card_name, basic, status, skills, road_items)
-                    row["活动名称"] = event_name  # Use extracted event name
-                    
-                    rows.append(row)
-                    print(f"    成功提取卡面: {card_name} (活动: {event_name})")
-                except Exception as e:
-                    print(f"    处理链接失败: {card_url} - {e}")
-                    continue
-    
-    elif not is_detail:
-        # Regular listing page
-        base_rows = extract_additional_cards_from_listing(soup)
-        target_names = [r.get("卡面名称", "") for r in base_rows]
-        event_name = base_rows[0].get("イベント名", "") if base_rows else ""
-        
-        # If we have links, try to match them with base rows for better targeting
-        if links and base_rows:
-            print(f"找到 {len(links)} 个详情链接，尝试匹配 {len(base_rows)} 个基础卡面")
-            target_names = [r.get("卡面名称", "") for r in base_rows]
-            matched_count = 0
-            
-            for link in links:
-                if matched_count >= len(base_rows):
-                    break
-                try:
-                    h, _ = crawl_page(link)
-                    sp = BeautifulSoup(h, "lxml")
-                    card_name = parse_card_name(h)
-                    
-                    # Skip profile pages and non-card pages
-                    if "プロフィール" in card_name or "詳細" in card_name:
-                        print(f"  跳过非卡面页面: {card_name}")
-                        continue
-                    
-                    # Check if this is a valid card page with bracketed name
-                    if not re.search(r"［[^］]+］", card_name):
-                        print(f"  跳过无效卡面: {card_name}")
-                        continue
-                    
-                    # Extract detailed information
-                    basic = extract_basic_info(sp)
-                    status = extract_status(sp)
-                    skills = extract_skills(sp)
-                    road_items = extract_road_items(sp)
-                    
-
-                    
-                    row = build_row(card_name, basic, status, skills, road_items)
-                    row["イベント名"] = event_name
-                    
-                    # Match with base row for rarity by finding the best character name match
-                    best_match_rarity = ""
-                    for br in base_rows:
-                        base_name = br.get("卡面名称", "")
-                        # Extract character name from both card names for comparison
-                        card_char = re.search(r"］([^☆\s]+)", card_name)
-                        base_char = re.search(r"］([^☆\s]+)", base_name) if base_name else None
-                        
-                        if card_char and base_char:
-                            if card_char.group(1).strip() == base_char.group(1).strip():
-                                best_match_rarity = br.get("レアリティ", "")
-                                break
-                        # Fallback: check if any significant part of base name appears in card name
-                        elif base_name and any(part in card_name for part in base_name.split() if len(part) > 1):
-                            best_match_rarity = br.get("レアリティ", "")
-                            break
-                    
-                    if best_match_rarity:
-                        row["レアリティ"] = best_match_rarity
-                    
-                    rows.append(row)
-                    matched_count += 1
-                    print(f"  匹配卡面 {matched_count}: {card_name}")
-                except Exception as e:
-                    print(f"  处理链接失败: {link} - {e}")
-                    continue
-        
-        # If we couldn't find detail links but have base rows, use them directly
-        elif not links and base_rows:
-            print(f"未找到详情页链接，使用列表页基础数据（{len(base_rows)}个卡面）")
-            for br in base_rows:
-                row = {
-                    "卡面名称": br.get("卡面名称", ""),
-                    "レアリティ": br.get("レアリティ", ""),
-                    "イベント名": br.get("イベント名", ""),
-                    # Fill other fields with empty values
-                    "タイプ/属性": "",
-                    "ファン上限": "",
-                    "追加日": "",
-                    "Da": "", "Vo": "", "Pf": "",
-                    "センタースキル": "",
-                    "ライブスキル": "",
-                    "サポートスキル": "",
-                    "取得できるスキル/アイテム": "",
-                }
-                rows.append(row)
-    
-    if rows:
-        # Already parsed from listing + detail matching
-        pass
-    else:
-        # Fallback: single card page
-        print("检测到卡面详情页，正在解析……")
-        card_name = parse_card_name(html)
-        basic = extract_basic_info(soup)
-        status = extract_status(soup)
-        skills = extract_skills(soup)
-        road_items = extract_road_items(soup)
-        row = build_row(card_name, basic, status, skills, road_items)
-        add = row.get("追加日", "")
-        m_event = re.search(r"追加日[^\n]*（([^）]+)）", add)
-        if m_event:
-            row["イベント名"] = m_event.group(1).strip()
-        rows.append(row)
-
-    # Load template columns order
-    base_dir = os.path.dirname(os.path.dirname(__file__))
-    template_path = os.path.join(base_dir, "es2 卡面名称及技能一览（新表）示例.xlsx")
-    try:
-        tmpl_df = pd.read_excel(template_path)
-        columns_order = tmpl_df.columns.tolist()
-        # 确保活动名称列被包含，如果不存在则添加到卡面名称后面
-        if "活动名称" not in columns_order:
-            if "卡面名称" in columns_order:
-                idx = columns_order.index("卡面名称") + 1
-                columns_order.insert(idx, "活动名称")
-            else:
-                columns_order.insert(1, "活动名称")
-        print(f"使用模板列顺序（已添加活动名称列）: {columns_order}")
-    except Exception as e:
-        print(f"无法加载模板文件: {e}")
-        # 使用示例文件的确切列顺序
-        columns_order = [
-            "卡面名称", "活动名称", "center技能名称", "live技能名", "support技能名", "Unnamed",
-            "DA", "VO", "PF", "综合值", "center技能", "live技能（lv5）", "support技能（lv3）",
-            "MV衣装", "房间衣装", "背景", "spp对应乐曲", "故事"
-        ]
-
-    # Timestamped output filename
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_name = f"es2 卡面名称及技能一览{ts}.xlsx"
-    out_path = os.path.join(base_dir, out_name)
-    
-    # Map rows to template format with special handling for 5-star cards
-    final_rows: List[Dict[str, str]] = []
-    if rows and columns_order:
-        for r in rows:
-            # Check if this is a 5-star card
-            rarity = r.get("レアリティ", "").strip()
-            card_name = r.get("卡面名称", "")
-            is_5_star = rarity == "☆5" or "☆5" in card_name or "★5" in card_name
-            
-            if is_5_star:
-                # Create two rows for 5-star cards: initial stats and max stats
-                # Row 1: Initial stats (一卡)
-                initial_row = map_to_template(r, columns_order, use_initial_stats=True)
-                final_rows.append(initial_row)
-                
-                # Row 2: Max stats (満破)
-                max_row = map_to_template(r, columns_order, use_initial_stats=False)
-                final_rows.append(max_row)
-            else:
-                # Single row for non-5-star cards
-                final_rows.append(map_to_template(r, columns_order))
-    else:
-        final_rows = rows
-    
-    write_excel_rows(out_path, final_rows, columns_order)
-    print(f"已输出: {out_path}")
+# 已移除：main 函数（CLI 模式与交互逻辑不在 web 链路中）
 
 
-def extract_cards_with_multithreaded_details(html: str, base_url: str, 
-                                           max_workers: int = 8, 
-                                           fetch_details: bool = True) -> List[Tuple[str, str, str]]:
-    """
-    提取卡面并使用多线程获取详细信息
-    
-    Args:
-        html: 页面HTML内容
-        base_url: 基础URL
-        max_workers: 最大工作线程数
-        fetch_details: 是否获取卡面详情（卡面名称）
-        
-    Returns:
-        List[Tuple[card_url, event_name, card_name]] - 卡面URL、活动名、卡面名称的列表
-    """
-    
-    print("=== 使用多线程提取卡面详情 ===")
-    
-    # 首先提取卡面URL和活动名
-    card_event_pairs = extract_cards_from_directory(html, base_url)
-    
-    if not card_event_pairs:
-        print("未找到任何卡面")
-        return []
-    
-    print(f"找到 {len(card_event_pairs)} 个卡面，准备获取详情...")
-    
-    if not fetch_details:
-        # 如果不需要获取详情，直接返回URL和活动名，卡面名称为空
-        return [(url, event, "") for url, event in card_event_pairs]
-    
-    # 提取所有卡面URL
-    card_urls = [url for url, _ in card_event_pairs]
-    
-    # 创建多线程获取器
-    fetcher = MultiThreadedCardFetcher(
-        max_workers=max_workers,
-        timeout=15,
-        delay=0.1  # 100ms延迟避免过于频繁的请求
-    )
-    
-    # 批量获取卡面详情
-    card_details = fetcher.fetch_card_details_batch(card_urls)
-    
-    # 组合结果
-    results = []
-    for card_url, event_name in card_event_pairs:
-        if card_url in card_details:
-            card_name, status = card_details[card_url]
-            results.append((card_url, event_name, card_name))
-        else:
-            results.append((card_url, event_name, "获取失败"))
-    
-    return results
+# 已移除：extract_cards_with_multithreaded_details（不在 app.py 的调用链中使用）
 
 
-def crawl_and_extract_with_multithreading(url: str, max_workers: int = 8) -> List[Tuple[str, str, str]]:
-    """
-    爬取页面并使用多线程提取卡面详情
-    
-    Args:
-        url: 目标URL
-        max_workers: 最大工作线程数
-        
-    Returns:
-        List[Tuple[card_url, event_name, card_name]] - 卡面信息列表
-    """
-    
-    print(f"开始爬取页面: {url}")
-    
-    try:
-        # 爬取页面
-        html, _ = crawl_page(url)
-        
-        # 使用多线程提取卡面详情
-        results = extract_cards_with_multithreaded_details(html, url, max_workers)
-        
-        print(f"\n=== 最终结果 ===")
-        print(f"成功提取 {len(results)} 个卡面的详细信息")
-        
-        # 按活动分组统计
-        event_stats = {}
-        for _, event_name, card_name in results:
-            if event_name not in event_stats:
-                event_stats[event_name] = []
-            event_stats[event_name].append(card_name)
-        
-        print(f"\n=== 按活动统计 ===")
-        for event_name, cards in event_stats.items():
-            print(f"{event_name}: {len(cards)} 个卡面")
-        
-        return results
-        
-    except Exception as e:
-        print(f"爬取失败: {e}")
-        return []
+# 已移除：crawl_and_extract_with_multithreading（不在 app.py 的调用链中使用）
 
 
 def export_cards_to_excel(url: str, output_dir: str = None, max_workers: int = 8, selected_card_urls: List[str] = None, card_url_to_event_name: Dict[str, str] = None, progress_callback=None) -> str:
@@ -1679,15 +1524,18 @@ def export_cards_to_excel(url: str, output_dir: str = None, max_workers: int = 8
     导出卡面到Excel文件的主函数，供app.py调用
     
     Args:
-        url: 目录页面或活动页面URL
+        url: 目录页面或活动页面URL（仅用于日志记录，不再用于自动提取）
         output_dir: 输出目录，默认为项目根目录
         max_workers: 最大工作线程数
-        selected_card_urls: 选中的卡面URL列表，如果为None则处理所有卡面
+        selected_card_urls: 选中的卡面URL列表，必须提供
         card_url_to_event_name: 卡面URL到活动名称的映射字典
         progress_callback: 进度回调函数，接收(stage, progress, message, eta)参数
         
     Returns:
         str: 生成的Excel文件路径
+        
+    Raises:
+        Exception: 当 selected_card_urls 为空或None时抛出异常
     """
     try:
         import time
@@ -1703,351 +1551,59 @@ def export_cards_to_excel(url: str, output_dir: str = None, max_workers: int = 8
         if output_dir is None:
             output_dir = os.path.dirname(os.path.dirname(__file__))
         
-        report_progress("初始化", 5, "正在分析页面类型...")
+        report_progress("初始化", 5, "开始处理前端传入的卡面链接...")
         
-        # 爬取页面
-        html, md = crawl_page(url)
-        soup = BeautifulSoup(html, "lxml")
+        # 验证必须的参数
+        if not selected_card_urls:
+            error_msg = "错误：未提供选中的卡面URL列表 (selected_card_urls)，无法处理"
+            print(f"ERROR: {error_msg}")
+            report_progress("错误", 0, error_msg)
+            raise Exception(error_msg)
         
-        # 检测页面类型
-        preview_name = parse_card_name(html)
-        full_text = soup.get_text("\n", strip=True)
+        if len(selected_card_urls) == 0:
+            error_msg = "错误：选中的卡面URL列表为空，无法处理"
+            print(f"ERROR: {error_msg}")
+            report_progress("错误", 0, error_msg)
+            raise Exception(error_msg)
         
-        # 检查是否为年度活动目录页
-        # More specific check: must have directory indicators AND not be a specific event page
-        has_directory_text = "年間イベント" in full_text or "イベント一覧" in full_text
-        is_known_directory_url = "/895943" in url
-        # Check if this looks like a specific event page (has specific event title patterns)
-        has_specific_event_title = bool(re.search(r"(スカウト|ガシャ|イベント).*Stage|Bright me up", full_text))
+        print(f"接收到前端选中的卡面URL，共 {len(selected_card_urls)} 个")
+        report_progress("验证", 10, f"验证通过，共 {len(selected_card_urls)} 个选中的卡面URL")
         
-        # 对于已知的目录URL，优先识别为目录页，即使包含特定事件标题
-        # 因为年度目录页面本身就会包含各种事件的标题
-        if is_known_directory_url:
-            is_directory = True
-        else:
-            # Only treat as directory if it has directory indicators AND doesn't look like a specific event page
-            is_directory = has_directory_text and not has_specific_event_title
-        
-        # 检测是否为详情页
-        # 更精确的scout section检测：只有当页面包含多个scout相关关键词时才认为是scout页面
-        scout_keywords = ["スカウト追加カード", "追加カード", "スカウトの確率について"]
-        has_scout_section = any(k in full_text for k in scout_keywords)
-        
-        # 如果页面标题包含卡面名称格式（［］包围的内容），优先识别为详情页
-        has_card_name_pattern = bool(re.search(r"\uFF3B[^\uFF3D]+\uFF3D", preview_name))
-        
-        # 详情页判断：有卡面名称格式且不是目录页，即使有scout相关内容也可能是详情页
-        is_detail = has_card_name_pattern and not is_directory and not has_scout_section
-        
-        report_progress("分析", 15, f"页面类型: {'目录页' if is_directory else '详情页' if is_detail else '列表页'}")
-        
-        # 收集卡面链接
+        # 构建卡面链接列表，包含活动名称信息
         links = []
-        if selected_card_urls:
-            # 优先使用前端选中的卡面URL，跳过页面提取
-            print(f"接收到前端选中的卡面URL，共 {len(selected_card_urls)} 个，直接处理")
-            report_progress("链接接收", 20, f"接收到选中卡面链接 {len(selected_card_urls)} 个")
-            links = []
-            for card_url in selected_card_urls:
-                if card_url_to_event_name and card_url in card_url_to_event_name:
-                    event_name = card_url_to_event_name[card_url]
-                else:
-                    event_name = "未知活动"
-                links.append((card_url, event_name))
-            # 使用目录页处理逻辑（多线程）
-            is_directory = True
-            is_detail = False
-        elif is_detail:
-            # 检测到卡面详情页
-            if selected_card_urls:
-                # 如果有选中的卡面URL，直接处理这些URL，不重定向
-                print(f"检测到卡面详情页，但有选中的卡面URL ({len(selected_card_urls)} 个)，直接处理选中的卡面...")
-                report_progress("直接处理", 20, f"直接处理选中的 {len(selected_card_urls)} 个卡面")
-                
-                # 直接使用选中的卡面URL，使用传递的活动名称映射
-                links = []
-                for card_url in selected_card_urls:
-                    # 使用传递的活动名称映射，如果没有映射则使用默认值
-                    if card_url_to_event_name and card_url in card_url_to_event_name:
-                        event_name = card_url_to_event_name[card_url]
-                    else:
-                        event_name = "未知活动"  # 默认值，后续会通过爬取详情页获取正确的活动名称
-                    links.append((card_url, event_name))
-                
-                # 当有多个选中的卡面URL时，使用目录页面的处理逻辑（多线程处理）
-                is_directory = True
-                is_detail = False
+        for card_url in selected_card_urls:
+            if card_url_to_event_name and card_url in card_url_to_event_name:
+                event_name = card_url_to_event_name[card_url]
             else:
-                # 没有选中的卡面URL，自动重定向到目录页面获取所有相关卡面
-                print("检测到卡面详情页，自动重定向到目录页面获取所有相关卡面...")
-                report_progress("重定向", 20, "检测到卡面详情页，重定向到目录页面获取所有卡面")
-                
-                # 使用默认的目录页面URL
-                directory_url = "https://gamerch.com/ensemble-star-music/895943"
-                print(f"重定向到目录页面: {directory_url}")
-                
-                # 重新获取目录页面内容
-                directory_html, _ = crawl_page(directory_url)
-                
-                # 从目录页面提取卡面链接
-                all_links = extract_cards_from_directory(directory_html, directory_url)
-                
-                if not all_links:
-                    # 如果目录页面也没有找到链接，则只处理当前卡面
-                    print("警告：目录页面未找到任何卡面链接，将只处理当前卡面")
-                    report_progress("链接提取", 25, "目录页面未找到链接，只处理当前卡面")
-                    links = []
-                else:
-                    print(f"从目录页面提取到 {len(all_links)} 个卡面链接")
-                    
-                    # 如果指定了选中的卡面URL，则过滤链接
-                    if selected_card_urls:
-                        print(f"DEBUG: 选中的卡面URL数量: {len(selected_card_urls)}")
-                        print(f"DEBUG: 提取到的所有卡面数量: {len(all_links)}")
-                        
-                        # 规范化选中的卡面URL
-                        normalized_selected_urls = set()
-                        for card_url in selected_card_urls:
-                            from urllib.parse import urlparse
-                            parsed = urlparse(card_url)
-                            normalized_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
-                            normalized_selected_urls.add(normalized_url)
-                            print(f"DEBUG: 规范化选中URL: {card_url} -> {normalized_url}")
-                        
-                        # 过滤链接
-                        links = []
-                        for card_url, event_name in all_links:
-                            parsed = urlparse(card_url)
-                            normalized_card_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
-                            
-                            if normalized_card_url in normalized_selected_urls:
-                                links.append((card_url, event_name))
-                                print(f"DEBUG: ✓ URL匹配成功: {normalized_card_url} (活动: {event_name})")
-                        
-                        if len(links) == 0:
-                            print("DEBUG: 没有匹配的卡面URL，将使用所有提取到的卡面")
-                            links = all_links
-                    else:
-                        links = all_links
-                    
-                    report_progress("链接提取", 25, f"从目录页面提取到 {len(links)} 个卡面链接")
-                    
-                    # 将页面类型更改为目录页面，以便使用正确的处理逻辑
-                    is_directory = True
-                    is_detail = False
-        elif is_directory:
-            # 从目录页面提取卡面链接
-            report_progress("链接提取", 20, "正在从目录页面提取卡面链接...")
-            all_links = extract_cards_from_directory(html, url)
-            
-            # 检查是否提取到任何链接
-            if not all_links:
-                error_msg = "错误：从目录页面未提取到任何卡面链接，请检查页面内容或URL"
-                print(f"ERROR: {error_msg}")
-                raise Exception(error_msg)
-            
-            # 如果指定了选中的卡面URL，则过滤链接
-            if selected_card_urls:
-                print(f"DEBUG: 选中的卡面URL数量: {len(selected_card_urls)}")
-                print(f"DEBUG: 提取到的所有卡面数量: {len(all_links)}")
-                
-                # 打印选中的URL列表
-                print("DEBUG: 选中的卡面URL列表:")
-                for i, url in enumerate(selected_card_urls):
-                    print(f"  {i+1}. {url}")
-                
-                # 打印提取到的URL列表
-                print("DEBUG: 提取到的卡面URL列表:")
-                for i, (card_url, event_name) in enumerate(all_links):
-                    print(f"  {i+1}. {card_url} (活动: {event_name})")
-                
-                # 规范化选中的卡面URL（移除可能的查询参数和片段）
-                normalized_selected_urls = set()
-                for url in selected_card_urls:
-                    # 移除查询参数和片段，只保留路径部分
-                    from urllib.parse import urlparse
-                    parsed = urlparse(url)
-                    normalized_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
-                    normalized_selected_urls.add(normalized_url)
-                    print(f"DEBUG: 规范化选中URL: {url} -> {normalized_url}")
-                
-                print(f"DEBUG: 规范化后的选中URL数量: {len(normalized_selected_urls)}")
-                
-                # 使用URL直接匹配进行过滤
-                links = []
-                matched_urls = set()
-                unmatched_selected = set(normalized_selected_urls)
-                
-                for card_url, event_name in all_links:
-                    # 规范化提取到的卡面URL
-                    parsed = urlparse(card_url)
-                    normalized_card_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
-                    
-                    print(f"DEBUG: 检查匹配: {normalized_card_url}")
-                    
-                    if normalized_card_url in normalized_selected_urls:
-                        links.append((card_url, event_name))
-                        matched_urls.add(normalized_card_url)
-                        unmatched_selected.discard(normalized_card_url)
-                        print(f"DEBUG: ✓ URL匹配成功: {normalized_card_url} (活动: {event_name})")
-                    else:
-                        print(f"DEBUG: ✗ URL未匹配: {normalized_card_url}")
-                
-                print(f"DEBUG: 过滤后的链接数量: {len(links)}")
-                print(f"DEBUG: 匹配到的URL数量: {len(matched_urls)}")
-                print(f"DEBUG: 未匹配的选中URL数量: {len(unmatched_selected)}")
-                
-                if unmatched_selected:
-                    print("DEBUG: 未匹配的选中URL:")
-                    for url in unmatched_selected:
-                        print(f"  - {url}")
-                
-                if len(links) == 0 and len(all_links) > 0:
-                    print("DEBUG: 没有匹配的卡面URL，将使用所有提取到的卡面")
-                    # 如果没有匹配到任何卡面，使用所有提取到的卡面
-                    links = all_links
-                    
-                report_progress("过滤", 25, f"根据选中卡面URL过滤，从 {len(all_links)} 个链接中选择了 {len(links)} 个")
-            else:
-                links = all_links
-                report_progress("链接提取", 25, f"提取到 {len(links)} 个卡面链接")
-        else:
-            # 常规列表页面
-            report_progress("链接提取", 20, "正在从列表页面提取卡面链接...")
-            links = find_card_links(soup, url)
-            
-            # 检查是否提取到任何链接
-            if not links:
-                error_msg = "错误：从列表页面未提取到任何卡面链接，请检查页面内容或URL"
-                print(f"ERROR: {error_msg}")
-                raise Exception(error_msg)
-                
-            report_progress("链接提取", 25, f"提取到 {len(links)} 个卡面链接")
+                event_name = "未知活动"
+            links.append((card_url, event_name))
+            print(f"  - {card_url} (活动: {event_name})")
         
-        rows: List[Dict[str, str]] = []
+        report_progress("链接处理", 20, f"构建卡面链接列表完成，共 {len(links)} 个")
         
-        # 处理不同页面类型
-        if is_directory:
-            # 目录页面：使用多线程处理所有找到的卡面-活动对
-            report_progress("数据处理", 30, f"处理目录页面，找到 {len(links)} 个卡面链接")
-            
-            if links:
-                # 使用多线程模式处理目录页面
-                report_progress("数据获取", 30, f"使用多线程模式处理 {len(links)} 个卡面的完整详情...")
-                
-                # 创建多线程获取器
-                fetcher = MultiThreadedCardFetcher(
-                    max_workers=max_workers,
-                    timeout=15,
-                    delay=0.1
-                )
-                
-                # 批量获取卡面完整详情
-                card_details_list = fetcher.fetch_card_full_details_batch(links, progress_callback)
-                
-                # 将结果添加到rows
-                rows.extend(card_details_list)
-                
-                report_progress("数据获取", 80, f"多线程处理完成，成功提取 {len(card_details_list)} 个卡面的完整详情")
-            else:
-                report_progress("数据处理", 50, "没有找到符合条件的卡面链接")
-                
-        elif not is_detail:
-            # 常规列表页面处理逻辑（保持原有逻辑）
-            base_rows = extract_additional_cards_from_listing(soup)
-            target_names = [r.get("卡面名称", "") for r in base_rows]
-            event_name = base_rows[0].get("イベント名", "") if base_rows else ""
-            
-            # 如果有链接，尝试匹配基础行以获得更好的定位
-            if links and base_rows:
-                print(f"找到 {len(links)} 个详情链接，尝试匹配 {len(base_rows)} 个基础卡面")
-                matched_count = 0
-                
-                for link in links:
-                    if matched_count >= len(base_rows):
-                        break
-                    try:
-                        h, _ = crawl_page(link)
-                        sp = BeautifulSoup(h, "lxml")
-                        card_name = parse_card_name(h)
-                        
-                        # 跳过个人资料页面和非卡面页面
-                        if "プロフィール" in card_name or "詳細" in card_name:
-                            continue
-                        
-                        # 检查是否为有效的卡面页面
-                        if not re.search(r"［[^］]+］", card_name):
-                            continue
-                        
-                        # 提取详细信息
-                        basic = extract_basic_info(sp)
-                        status = extract_status(sp)
-                        skills = extract_skills(sp)
-                        road_items = extract_road_items(sp)
-                        
-                        row = build_row(card_name, basic, status, skills, road_items)
-                        row["イベント名"] = event_name
-                        
-                        # 匹配基础行的稀有度
-                        best_match_rarity = ""
-                        for br in base_rows:
-                            base_name = br.get("卡面名称", "")
-                            card_char = re.search(r"］([^☆\s]+)", card_name)
-                            base_char = re.search(r"］([^☆\s]+)", base_name) if base_name else None
-                            
-                            if card_char and base_char:
-                                if card_char.group(1).strip() == base_char.group(1).strip():
-                                    best_match_rarity = br.get("レアリティ", "")
-                                    break
-                            elif base_name and any(part in card_name for part in base_name.split() if len(part) > 1):
-                                best_match_rarity = br.get("レアリティ", "")
-                                break
-                        
-                        if best_match_rarity:
-                            row["レアリティ"] = best_match_rarity
-                        
-                        rows.append(row)
-                        matched_count += 1
-                        print(f"  匹配卡面 {matched_count}: {card_name}")
-                    except Exception as e:
-                        print(f"  处理链接失败: {link} - {e}")
-                        continue
-            
-            # 如果找不到详情链接但有基础行，直接使用它们
-            elif not links and base_rows:
-                print(f"未找到详情页链接，使用列表页基础数据（{len(base_rows)}个卡面）")
-                for br in base_rows:
-                    row = {
-                        "卡面名称": br.get("卡面名称", ""),
-                        "レアリティ": br.get("レアリティ", ""),
-                        "イベント名": br.get("イベント名", ""),
-                        "タイプ/属性": "",
-                        "ファン上限": "",
-                        "追加日": "",
-                        "Da": "", "Vo": "", "Pf": "",
-                        "センタースキル": "",
-                        "ライブスキル": "",
-                        "サポートスキル": "",
-                        "取得できるスキル/アイテム": "",
-                    }
-                    rows.append(row)
-        else:
-            # 单个卡面详情页面
-            print("检测到卡面详情页，正在解析……")
-            card_name = parse_card_name(html)
-            basic = extract_basic_info(soup)
-            status = extract_status(soup)
-            skills = extract_skills(soup)
-            road_items = extract_road_items(soup)
-            row = build_row(card_name, basic, status, skills, road_items)
-            add = row.get("追加日", "")
-            m_event = re.search(r"追加日[^\n]*（([^）]+)）", add)
-            if m_event:
-                row["イベント名"] = m_event.group(1).strip()
-            rows.append(row)
+        # 使用多线程模式处理所有卡面
+        report_progress("数据获取", 30, f"使用多线程模式处理 {len(links)} 个卡面的完整详情...")
         
-        if not rows:
-            raise Exception("没有提取到任何卡面数据")
+        # 创建多线程获取器
+        fetcher = MultiThreadedCardFetcher(
+            max_workers=max_workers,
+            timeout=15,
+            delay=0.1
+        )
+        
+        # 批量获取卡面完整详情
+        card_details_list = fetcher.fetch_card_full_details_batch(links, progress_callback)
+        
+        if not card_details_list:
+            error_msg = "错误：未能获取到任何卡面详情数据"
+            print(f"ERROR: {error_msg}")
+            report_progress("错误", 0, error_msg)
+            raise Exception(error_msg)
+        
+        report_progress("数据获取", 80, f"多线程处理完成，成功提取 {len(card_details_list)} 个卡面的完整详情")
+        
+        # 使用多线程获取的数据
+        rows = card_details_list
         
         report_progress("Excel生成", 85, f"开始生成Excel文件，共 {len(rows)} 个卡面数据")
         

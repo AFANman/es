@@ -3,6 +3,90 @@
  * 处理活动列表的显示、选择、搜索和爬取功能
  */
 
+// API 服务类
+class ApiService {
+    constructor() {
+        this.baseUrl = '/api';
+    }
+
+    // 从Redis获取活动数据
+    async getEventsFromCache(sessionId) {
+        try {
+            const response = await fetch(`/api/events/${sessionId}`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            return await response.json();
+        } catch (error) {
+            console.error('获取活动数据失败:', error);
+            throw error;
+        }
+    }
+
+    // 开始爬取
+    async startCrawl(events) {
+        try {
+            const response = await fetch(`${this.baseUrl}/crawl/start`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ events })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            return await response.json();
+        } catch (error) {
+            console.error('开始爬取失败:', error);
+            throw error;
+        }
+    }
+
+    // 获取爬取进度
+    async getCrawlProgress(taskId) {
+        try {
+            const response = await fetch(`${this.baseUrl}/progress/${taskId}`);
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            return await response.json();
+        } catch (error) {
+            console.error('获取进度失败:', error);
+            throw error;
+        }
+    }
+
+    // 取消爬取
+    async cancelCrawl(taskId) {
+        try {
+            const response = await fetch(`${this.baseUrl}/cancel/${taskId}`, {
+                method: 'POST'
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            return await response.json();
+        } catch (error) {
+            console.error('取消爬取失败:', error);
+            throw error;
+        }
+    }
+}
+
 class EventsPage {
     constructor() {
         this.events = [];
@@ -14,6 +98,7 @@ class EventsPage {
         this.pullCurrentY = 0;
         this.isPulling = false;
         this.pullThreshold = 80;
+        this.api = new ApiService();
         
         this.init();
     }
@@ -203,23 +288,50 @@ class EventsPage {
         }, 500);
     }
 
-    // 从URL参数加载活动数据
+    // 从URL参数或Redis加载活动数据
     async loadEvents() {
         const urlParams = new URLSearchParams(window.location.search);
+        const sessionId = urlParams.get('session_id');
         const eventsData = urlParams.get('events');
         
+        // 优先尝试从Redis获取数据（使用session_id）
+        if (sessionId) {
+            try {
+                console.log('从Redis获取活动数据，会话ID:', sessionId);
+                const result = await this.api.getEventsFromCache(sessionId);
+                
+                if (result.success && result.events) {
+                    this.events = result.events;
+                    this.renderEvents();
+                    this.updateEventCount();
+                    console.log('成功从Redis加载活动数据:', this.events.length, '个活动');
+                    return;
+                } else {
+                    console.warn('从Redis获取活动数据失败:', result.message);
+                    this.showErrorState('活动数据已过期，请重新分析目录页');
+                    return;
+                }
+            } catch (error) {
+                console.error('从Redis获取活动数据失败:', error);
+                this.showErrorState('获取活动数据失败，请重新分析目录页');
+                return;
+            }
+        }
+        
+        // 回退到原始方式（从URL参数获取）
         if (eventsData) {
             try {
                 this.events = JSON.parse(decodeURIComponent(eventsData));
                 this.renderEvents();
                 this.updateEventCount();
+                console.log('从URL参数加载活动数据:', this.events.length, '个活动');
                 return;
             } catch (error) {
                 console.error('解析活动数据失败:', error);
             }
         }
         
-        // 如果没有URL参数，显示空状态
+        // 如果没有任何数据源，显示空状态
         this.showEmptyState();
     }
 
@@ -230,6 +342,20 @@ class EventsPage {
             <div class="empty-state">
                 <i class="fas fa-calendar-times"></i>
                 <p>暂无活动数据</p>
+                <button onclick="window.location.href='/'" class="btn-secondary">
+                    返回首页重新分析
+                </button>
+            </div>
+        `;
+    }
+
+    // 显示错误状态
+    showErrorState(message) {
+        const eventList = document.getElementById('eventList');
+        eventList.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-exclamation-triangle"></i>
+                <p>${message}</p>
                 <button onclick="window.location.href='/'" class="btn-secondary">
                     返回首页重新分析
                 </button>

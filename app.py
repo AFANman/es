@@ -17,6 +17,9 @@ import traceback
 from typing import Dict, List, Optional
 import logging
 
+# 导入Redis工具
+from redis_utils import save_events_to_cache, get_events_from_cache
+
 # 添加项目路径到sys.path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -436,11 +439,61 @@ def analyze():
                 'message': '请提供有效的Gamerch Ensemble Stars Music链接'
             }), 400
             
+        # 分析目录页
         result = analyze_directory_url(url)
-        return jsonify(result)
+        
+        if result['success'] and result['events']:
+            # 将活动数据保存到Redis
+            session_id = save_events_to_cache(result['events'])
+            
+            if session_id:
+                logger.info(f"活动数据已保存到Redis，会话ID: {session_id}")
+                return jsonify({
+                    'success': True,
+                    'session_id': session_id,
+                    'events_count': len(result['events']),
+                    'message': result['message']
+                })
+            else:
+                logger.warning("保存活动数据到Redis失败，回退到原始方式")
+                # Redis保存失败时，回退到原始方式
+                return jsonify(result)
+        else:
+            # 分析失败或无活动数据
+            return jsonify(result)
         
     except Exception as e:
         logger.error(f"分析API错误: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'服务器错误: {str(e)}'
+        }), 500
+
+@app.route('/api/events/<session_id>', methods=['GET'])
+def get_events(session_id):
+    """从Redis获取活动数据API"""
+    try:
+        logger.info(f"获取活动数据请求，会话ID: {session_id}")
+        
+        # 从Redis获取活动数据
+        events_data = get_events_from_cache(session_id)
+        
+        if events_data is not None:
+            logger.info(f"成功从Redis获取活动数据，活动数量: {len(events_data)}")
+            return jsonify({
+                'success': True,
+                'events': events_data,
+                'message': f'成功获取 {len(events_data)} 个活动'
+            })
+        else:
+            logger.warning(f"Redis中未找到会话ID为 {session_id} 的活动数据")
+            return jsonify({
+                'success': False,
+                'message': '活动数据不存在或已过期，请重新分析目录页'
+            }), 404
+            
+    except Exception as e:
+        logger.error(f"获取活动数据API错误: {e}")
         return jsonify({
             'success': False,
             'message': f'服务器错误: {str(e)}'

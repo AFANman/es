@@ -245,6 +245,27 @@ class ApiService {
         }
     }
 
+    // 从Redis获取活动数据
+    async getEventsFromCache(sessionId) {
+        try {
+            const response = await fetch(`/api/events/${sessionId}`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            return await response.json();
+        } catch (error) {
+            console.error('获取活动数据失败:', error);
+            throw error;
+        }
+    }
+
     // 开始爬取（调用真实后端）
     async startCrawl(events) {
         try {
@@ -470,14 +491,27 @@ class EnsembleStarsApp {
             // 调用真实的API分析目录页
             const result = await this.api.analyzeDirectory(url);
 
-            if (result.success && result.events.length > 0) {
-                this.notification.show(`分析完成！找到 ${result.events.length} 个活动`, 'success');
-                
-                // 跳转到活动列表页面，传递活动数据
-                setTimeout(() => {
-                    const eventsParam = encodeURIComponent(JSON.stringify(result.events));
-                    window.location.href = `/events?events=${eventsParam}`;
-                }, 1500);
+            if (result.success) {
+                if (result.session_id) {
+                    // 使用Redis缓存方式
+                    this.notification.show(`分析完成！找到 ${result.events_count} 个活动`, 'success');
+                    
+                    // 跳转到活动列表页面，传递会话ID
+                    setTimeout(() => {
+                        window.location.href = `/events?session_id=${result.session_id}`;
+                    }, 1500);
+                } else if (result.events && result.events.length > 0) {
+                    // 回退到原始方式（Redis不可用时）
+                    this.notification.show(`分析完成！找到 ${result.events.length} 个活动`, 'success');
+                    
+                    // 跳转到活动列表页面，传递活动数据
+                    setTimeout(() => {
+                        const eventsParam = encodeURIComponent(JSON.stringify(result.events));
+                        window.location.href = `/events?events=${eventsParam}`;
+                    }, 1500);
+                } else {
+                    this.notification.show('未找到符合条件的活动', 'warning');
+                }
             } else {
                 this.notification.show('未找到符合条件的活动', 'warning');
             }
