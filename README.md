@@ -14,6 +14,7 @@
 - **📊 实时进度** - 实时显示爬取进度和处理日志
 - **🎯 智能选择** - 支持多选活动，灵活控制爬取范围
 - **📥 自动下载** - 处理完成后自动下载Excel文件
+- **⚡ Redis缓存** - 使用Redis缓存活动数据，提升性能和用户体验
 
 ### 🚀 快速开始
 
@@ -71,18 +72,33 @@ python app.py
 
 ```
 es/
-├── index.html          # 主页面
-├── styles.css          # 样式文件
-├── script.js           # 前端逻辑
-├── app.py             # Flask后端服务
-├── start_server.py    # 一键启动脚本
-├── requirements.txt   # 依赖管理
-├── downloads/         # 下载文件目录
-└── es/               # 原有爬虫脚本
+├── templates/          # HTML模板目录
+│   ├── index.html     # 主页面模板
+│   ├── events.html    # 活动列表页模板
+│   └── results.html   # 结果展示页模板
+├── static/            # 静态资源目录
+│   └── events.js      # 活动列表页JavaScript
+├── styles.css         # 全局样式文件
+├── script.js          # 前端主要逻辑
+├── app.py            # Flask后端服务
+├── redis_utils.py    # Redis缓存工具类
+├── requirements.txt  # 依赖管理
+├── downloads/        # 下载文件目录
+├── docs/            # 项目文档
+│   ├── PROJECT_STRUCTURE.md    # 项目结构文档
+│   ├── API_DOCUMENTATION.md    # API接口文档
+│   └── DEVELOPMENT_GUIDE.md    # 开发指南
+└── es/              # 原有爬虫脚本
     ├── crawl_es2.py
     ├── multithreaded_card_fetcher.py
     └── ...
 ```
+
+### 📚 文档
+
+- **[项目结构文档](docs/PROJECT_STRUCTURE.md)** - 详细的项目架构和文件说明
+- **[API接口文档](docs/API_DOCUMENTATION.md)** - 完整的API接口规范
+- **[开发指南](docs/DEVELOPMENT_GUIDE.md)** - 开发环境配置和编码规范
 
 ## 特性
 - 多线程爬取：目录页与卡面详情均可并发抓取
@@ -94,7 +110,8 @@ es/
 ## 环境要求
 - Windows / PowerShell
 - Python 3.11 及以上
-- 依赖：`requests`、`beautifulsoup4`、`lxml`、`pandas`、`openpyxl`
+- Redis 6.0 及以上（用于数据缓存）
+- 依赖：`requests`、`beautifulsoup4`、`lxml`、`pandas`、`openpyxl`、`redis`、`Flask`
 
 安装示例（如未提供 `requirements.txt`）：
 ```

@@ -21,4 +21,4 @@ alwaysApply: false
 
 # 本项目文档
 - 接口文档 ~/docs/api_documentation.md
-- 项目文档 ~/docs/project_documentation.md
+- 项目结构 ~/docs/project_structure.md
