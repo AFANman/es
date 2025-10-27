@@ -6,13 +6,17 @@
 // API 服务类
 class ApiService {
     constructor() {
-        this.baseUrl = '/api';
+        // 根据当前环境动态设置baseUrl
+        const isLocalhost = window.location.hostname === 'localhost' || 
+                           window.location.hostname === '127.0.0.1' ||
+                           window.location.hostname === '0.0.0.0';
+        this.baseUrl = isLocalhost ? '/api' : '/es/api';
     }
 
     // 从Redis获取活动数据
     async getEventsFromCache(sessionId) {
         try {
-            const response = await fetch(`/es/api/events/${sessionId}`, {
+            const response = await fetch(`${this.baseUrl}/events/${sessionId}`, {
                 method: 'GET',
                 headers: {
                     'Content-Type': 'application/json',
@@ -33,7 +37,7 @@ class ApiService {
     // 开始爬取
     async startCrawl(events) {
         try {
-            const response = await fetch(`/es/api/crawl/start`, {
+            const response = await fetch(`${this.baseUrl}/crawl/start`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -55,7 +59,7 @@ class ApiService {
     // 获取爬取进度
     async getCrawlProgress(taskId) {
         try {
-            const response = await fetch(`/es/api/progress/${taskId}`);
+            const response = await fetch(`${this.baseUrl}/progress/${taskId}`);
             
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
@@ -71,7 +75,7 @@ class ApiService {
     // 取消爬取
     async cancelCrawl(taskId) {
         try {
-            const response = await fetch(`/es/api/cancel/${taskId}`, {
+            const response = await fetch(`${this.baseUrl}/cancel/${taskId}`, {
                 method: 'POST'
             });
 
@@ -82,6 +86,22 @@ class ApiService {
             return await response.json();
         } catch (error) {
             console.error('取消爬取失败:', error);
+            throw error;
+        }
+    }
+
+    // 获取任务列表
+    async getTasks() {
+        try {
+            const response = await fetch(`${this.baseUrl}/tasks`);
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            return await response.json();
+        } catch (error) {
+            console.error('获取任务列表失败:', error);
             throw error;
         }
     }
@@ -103,6 +123,14 @@ class EventsPage {
         this.init();
     }
 
+    // 根据环境动态生成页面URL
+    getPageUrl(path) {
+        const isLocalhost = window.location.hostname === 'localhost' || 
+                           window.location.hostname === '127.0.0.1' ||
+                           window.location.hostname === '0.0.0.0';
+        return isLocalhost ? path : `/es${path}`;
+    }
+
     init() {
         this.bindEvents();
         this.loadEvents();
@@ -113,7 +141,7 @@ class EventsPage {
     bindEvents() {
         // 返回首页按钮
         document.getElementById('backToHomeBtn').addEventListener('click', () => {
-            window.location.href = '/es/';
+            window.location.href = this.getPageUrl('/');
         });
 
         // 全选/清空按钮
@@ -342,7 +370,7 @@ class EventsPage {
             <div class="empty-state">
                 <i class="fas fa-calendar-times"></i>
                 <p>暂无活动数据</p>
-                <button onclick="window.location.href='/es/'" class="btn-secondary">
+                <button onclick="window.location.href=eventsPage.getPageUrl('/')" class="btn-secondary">
                     返回首页重新分析
                 </button>
             </div>
@@ -356,7 +384,7 @@ class EventsPage {
             <div class="empty-state">
                 <i class="fas fa-exclamation-triangle"></i>
                 <p>${message}</p>
-                <button onclick="window.location.href='/es/'" class="btn-secondary">
+                <button onclick="window.location.href=eventsPage.getPageUrl('/')" class="btn-secondary">
                     返回首页重新分析
                 </button>
             </div>
@@ -556,18 +584,7 @@ class EventsPage {
         
         try {
             console.log('发送爬取请求...');
-            const response = await fetch(`/es/api/crawl/start`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    events: selectedEventsList
-                })
-            });
-
-            console.log('响应状态:', response.status);
-            const result = await response.json();
+            const result = await this.api.startCrawl(selectedEventsList);
             console.log('响应结果:', result);
             
             if (result.success) {
@@ -633,8 +650,7 @@ class EventsPage {
         if (!this.currentTask) return;
 
         try {
-            const response = await fetch(`/es/api/progress/${this.currentTask}`);
-            const progress = await response.json();
+            const progress = await this.api.getCrawlProgress(this.currentTask);
 
             this.updateProgressDisplay(progress);
 
@@ -838,11 +854,7 @@ class EventsPage {
         if (!this.currentTask) return;
 
         try {
-            const response = await fetch(`/es/api/cancel/${this.currentTask}`, {
-                method: 'POST'
-            });
-
-            const result = await response.json();
+            const result = await this.api.cancelCrawl(this.currentTask);
             
             if (result.success) {
                 this.showNotification('爬取已取消', 'info');
@@ -903,34 +915,37 @@ class EventsPage {
                 // 如果任务是在24小时内完成的，显示下载按钮
                 if (now - completedAt < 24 * 60 * 60 * 1000) {
                     // 验证任务是否仍然有效
-                    const response = await fetch(`/es/api/progress/${lastCompletedTask.taskId}`);
-                    if (response.ok) {
-                        const progress = await response.json();
+                    try {
+                        const progress = await this.api.getCrawlProgress(lastCompletedTask.taskId);
                         if (progress.success && progress.status === 'completed' && progress.download_url) {
                             this.showDownloadButton(progress.download_url);
                         }
+                    } catch (error) {
+                        console.error('验证任务失败:', error);
                     }
                 }
             }
             
             // 同时检查是否有其他已完成的任务
-            const tasksResponse = await fetch(`/es/api/tasks`);
-            if (tasksResponse.ok) {
-                const tasksData = await tasksResponse.json();
+            try {
+                const tasksData = await this.api.getTasks();
                 if (tasksData.success && tasksData.tasks && tasksData.tasks.length > 0) {
                     // 找到最新的已完成任务
                     const completedTasks = tasksData.tasks.filter(task => task.status === 'completed');
                     if (completedTasks.length > 0) {
                         const latestTask = completedTasks[completedTasks.length - 1];
-                        const progressResponse = await fetch(`/es/api/progress/${latestTask.taskId}`);
-                        if (progressResponse.ok) {
-                            const progress = await progressResponse.json();
+                        try {
+                            const progress = await this.api.getCrawlProgress(latestTask.taskId);
                             if (progress.success && progress.download_url) {
                                 this.showDownloadButton(progress.download_url);
                             }
+                        } catch (error) {
+                            console.error('获取任务进度失败:', error);
                         }
                     }
                 }
+            } catch (error) {
+                console.error('获取任务列表失败:', error);
             }
         } catch (error) {
             console.error('检查已完成任务失败:', error);
@@ -942,4 +957,6 @@ class EventsPage {
 let eventsPage;
 document.addEventListener('DOMContentLoaded', () => {
     eventsPage = new EventsPage();
+    eventsPage.init();
+    window.eventsPage = eventsPage; // 添加到全局作用域以便调试
 });

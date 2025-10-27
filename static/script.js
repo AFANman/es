@@ -220,7 +220,13 @@ class LoadingManager {
 // API 服务
 class ApiService {
     constructor() {
-        this.baseUrl = '/es/api'; // 假设后端API的基础URL
+        // 根据当前环境动态设置baseUrl
+        // 开发环境使用/api，生产环境（通过Nginx代理）使用/es/api
+        // 简单检测：如果是localhost或127.0.0.1，则为开发环境
+        const isLocalhost = window.location.hostname === 'localhost' || 
+                           window.location.hostname === '127.0.0.1' ||
+                           window.location.hostname === '0.0.0.0';
+        this.baseUrl = isLocalhost ? '/api' : '/es/api';
     }
 
     // 分析目录页
@@ -333,8 +339,17 @@ class EnsembleStarsApp {
         this.currentTaskId = null;
         this.progressInterval = null;
         this.lastProcessedLogIndex = 0;
+        this.currentDownloadUrl = null; // 保存当前任务的下载URL
 
         this.init();
+    }
+
+    // 根据环境动态生成页面URL
+    getPageUrl(path) {
+        const isLocalhost = window.location.hostname === 'localhost' || 
+                           window.location.hostname === '127.0.0.1' ||
+                           window.location.hostname === '0.0.0.0';
+        return isLocalhost ? path : `/es${path}`;
     }
 
     init() {
@@ -498,7 +513,7 @@ class EnsembleStarsApp {
                     
                     // 跳转到活动列表页面，传递会话ID
                     setTimeout(() => {
-                        window.location.href = `/es/events?session_id=${result.session_id}`;
+                        window.location.href = this.getPageUrl(`/events?session_id=${result.session_id}`);
                     }, 1500);
                 } else if (result.events && result.events.length > 0) {
                     // 回退到原始方式（Redis不可用时）
@@ -507,7 +522,7 @@ class EnsembleStarsApp {
                     // 跳转到活动列表页面，传递活动数据
                     setTimeout(() => {
                         const eventsParam = encodeURIComponent(JSON.stringify(result.events));
-                        window.location.href = `/es/events?events=${eventsParam}`;
+                        window.location.href = this.getPageUrl(`/events?events=${eventsParam}`);
                     }, 1500);
                 } else {
                     this.notification.show('未找到符合条件的活动', 'warning');
@@ -697,6 +712,9 @@ class EnsembleStarsApp {
                     this.state.addLog('Excel文件生成完成', 'success');
                     document.getElementById('startCrawlBtn').classList.remove('loading');
 
+                    // 保存下载URL（优先使用后端返回的URL）
+                    this.currentDownloadUrl = res.download_url;
+
                     // 显示进度区域的下载按钮
                     const downloadBtn = document.getElementById('downloadProgressBtn');
                     if (downloadBtn) {
@@ -707,15 +725,14 @@ class EnsembleStarsApp {
                         downloadBtn.title = '下载';
                         // 移除旧的事件监听器并添加新的
                         downloadBtn.onclick = null;
-                        const currentTaskId = this.currentTaskId;
-                        downloadBtn.onclick = () => this.downloadExcelWithTaskId(currentTaskId);
+                        downloadBtn.onclick = () => this.downloadExcelWithUrl();
                     }
 
                     // 显示下载兜底按钮（防止浏览器阻止自动下载）
                     const fb = document.getElementById('downloadFallback');
                     const fblink = document.getElementById('downloadFallbackLink');
                     if (fb && fblink) {
-                        fblink.href = `${this.baseUrl}/download/${this.currentTaskId}`;
+                        fblink.href = this.currentDownloadUrl;
                         fb.style.display = 'block';
                         // 添加醒目的样式
                         fb.style.animation = 'pulse 2s infinite';
@@ -789,15 +806,14 @@ class EnsembleStarsApp {
 
     // 下载Excel文件
     downloadExcel() {
-        if (!this.currentTaskId) {
-            this.state.addLog('无法下载：任务ID不存在', 'error');
+        if (!this.currentDownloadUrl) {
+            this.state.addLog('无法下载：下载链接不存在', 'error');
             return;
         }
 
         // 创建下载链接并触发下载
-        const downloadUrl = `${this.baseUrl}/download/${this.currentTaskId}`;
         const link = document.createElement('a');
-        link.href = downloadUrl;
+        link.href = this.currentDownloadUrl;
         link.style.display = 'none';
         document.body.appendChild(link);
         link.click();
@@ -806,23 +822,22 @@ class EnsembleStarsApp {
         this.state.addLog('开始下载Excel文件...', 'success');
     }
 
-    // 使用指定任务ID下载Excel文件
-    downloadExcelWithTaskId(taskId) {
-        if (!taskId) {
-            this.state.addLog('无法下载：任务ID不存在', 'error');
+    // 使用保存的下载URL下载Excel文件
+    downloadExcelWithUrl() {
+        if (!this.currentDownloadUrl) {
+            this.state.addLog('无法下载：下载链接不存在', 'error');
             return;
         }
 
         // 创建下载链接并触发下载
-        const downloadUrl = `${this.baseUrl}/download/${taskId}`;
         const link = document.createElement('a');
-        link.href = downloadUrl;
+        link.href = this.currentDownloadUrl;
         link.style.display = 'none';
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
         
-        this.state.addLog(`开始下载Excel文件 (任务ID: ${taskId})...`, 'success');
+        this.state.addLog('开始下载Excel文件...', 'success');
     }
 
     // 处理取消爬取

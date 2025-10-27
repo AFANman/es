@@ -16,6 +16,7 @@ import json
 import traceback
 from typing import Dict, List, Optional
 import logging
+import platform
 
 # 导入Redis工具
 from redis_utils import save_events_to_cache, get_events_from_cache
@@ -53,6 +54,20 @@ CORS(app)  # 允许跨域请求
 # 全局任务存储
 tasks: Dict[str, Dict] = {}
 task_lock = threading.Lock()
+
+# 环境检测函数
+def is_production_environment():
+    """检测是否为生产环境（Linux系统）"""
+    return platform.system() == 'Linux'
+
+def get_download_url(task_id):
+    """根据环境生成正确的下载URL"""
+    if is_production_environment():
+        # Linux生产环境，使用/es前缀匹配Nginx代理
+        return f'/es/api/download/{task_id}'
+    else:
+        # Windows开发环境，直接访问API
+        return f'/api/download/{task_id}'
 
 class CrawlTask:
     """爬取任务类"""
@@ -412,7 +427,9 @@ def results():
     if not task:
         return render_template('index.html')  # 如果任务不存在，返回主页
     
-    return render_template('results.html', task_id=task_id, task=task)
+    # 生成正确的下载URL
+    download_url = get_download_url(task_id) if task.status == 'completed' and task.result_file else None
+    return render_template('results.html', task_id=task_id, task=task, download_url=download_url)
 
 @app.route('/events')
 def events():
@@ -575,7 +592,7 @@ def get_progress(task_id):
         
         # 如果任务完成且有结果文件，添加下载URL
         if task.status == 'completed' and task.result_file:
-            response_data['download_url'] = f'/es/api/download/{task_id}'
+            response_data['download_url'] = get_download_url(task_id)
             
         return jsonify(response_data)
         

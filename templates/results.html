@@ -32,10 +32,10 @@
                 </div>
             </div>
 
-            {% if task.status == 'completed' and task.result_file %}
+            {% if download_url %}
             <div class="download-section">
                 <h2>下载结果</h2>
-                <a href="/api/download/{{ task_id }}" class="download-btn" download>
+                <a href="{{ download_url }}" class="download-btn" download>
                     <span>📥</span> 下载Excel文件
                 </a>
             </div>
