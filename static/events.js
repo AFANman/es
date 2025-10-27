@@ -812,21 +812,83 @@ class EventsPage {
     }
 
     // 下载结果文件
-    downloadResult() {
+    async downloadResult() {
         if (!this.downloadUrl) {
             this.showNotification('下载链接不可用', 'error');
             return;
         }
-        console.log("下载链接:", this.downloadUrl);
-        // 创建临时链接进行下载
-        const link = document.createElement('a');
-        link.href = this.downloadUrl;
-        link.download = '';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
         
-        this.showNotification('开始下载文件', 'success');
+        console.log("开始下载文件，下载链接:", this.downloadUrl);
+        
+        try {
+            // 先通过 fetch 检查响应
+            console.log("发送下载请求...");
+            const response = await fetch(this.downloadUrl);
+            
+            console.log("响应状态:", response.status);
+            console.log("响应头:", Object.fromEntries(response.headers.entries()));
+            
+            if (!response.ok) {
+                // 如果响应不成功，尝试读取错误信息
+                const errorText = await response.text();
+                console.error("下载请求失败:", errorText);
+                
+                try {
+                    const errorJson = JSON.parse(errorText);
+                    this.showNotification(`下载失败: ${errorJson.message || '未知错误'}`, 'error');
+                } catch (e) {
+                    this.showNotification(`下载失败: HTTP ${response.status}`, 'error');
+                }
+                return;
+            }
+            
+            // 检查响应类型
+            const contentType = response.headers.get('content-type');
+            console.log("Content-Type:", contentType);
+            
+            if (contentType && contentType.includes('application/json')) {
+                // 如果返回的是JSON，说明有错误
+                const errorData = await response.json();
+                console.error("服务器返回JSON错误:", errorData);
+                this.showNotification(`下载失败: ${errorData.message || '服务器返回了错误响应'}`, 'error');
+                return;
+            }
+            
+            // 获取文件名
+            const contentDisposition = response.headers.get('content-disposition');
+            let filename = 'download.xlsx';
+            if (contentDisposition) {
+                const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+                if (filenameMatch && filenameMatch[1]) {
+                    filename = filenameMatch[1].replace(/['"]/g, '');
+                }
+            }
+            console.log("文件名:", filename);
+            
+            // 获取文件数据
+            const blob = await response.blob();
+            console.log("文件大小:", blob.size, "bytes");
+            console.log("文件类型:", blob.type);
+            
+            // 创建下载链接
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            // 清理临时URL
+            window.URL.revokeObjectURL(url);
+            
+            this.showNotification('文件下载成功', 'success');
+            console.log("文件下载完成");
+            
+        } catch (error) {
+            console.error("下载过程中发生错误:", error);
+            this.showNotification(`下载失败: ${error.message}`, 'error');
+        }
     }
 
     // 取消爬取

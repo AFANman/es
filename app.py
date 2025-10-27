@@ -636,35 +636,68 @@ def cancel_crawl(task_id):
 def download_result(task_id):
     """下载结果文件API"""
     try:
+        logger.info(f"收到下载请求，任务ID: {task_id}")
+        
         with task_lock:
             task = tasks.get(task_id)
             
         if not task:
+            logger.warning(f"任务不存在: {task_id}")
             return jsonify({
                 'success': False,
                 'message': '任务不存在'
             }), 404
             
+        logger.info(f"任务状态: {task.status}, 结果文件: {task.result_file}")
+            
         if task.status != 'completed' or not task.result_file:
+            logger.warning(f"文件尚未准备好，任务状态: {task.status}, 结果文件: {task.result_file}")
             return jsonify({
                 'success': False,
                 'message': '文件尚未准备好'
             }), 400
             
         if not os.path.exists(task.result_file):
+            logger.error(f"文件不存在: {task.result_file}")
             return jsonify({
                 'success': False,
                 'message': '文件不存在'
             }), 404
             
-        return send_file(
-            task.result_file,
-            as_attachment=True,
-            download_name=os.path.basename(task.result_file)
-        )
+        # 获取文件信息
+        file_size = os.path.getsize(task.result_file)
+        filename = os.path.basename(task.result_file)
+        logger.info(f"准备下载文件: {filename}, 大小: {file_size} bytes")
+        
+        # 确保文件是Excel格式
+        if not filename.endswith('.xlsx'):
+            logger.warning(f"文件格式可能不正确: {filename}")
+        
+        try:
+            response = send_file(
+                task.result_file,
+                as_attachment=True,
+                download_name=filename,
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+            
+            # 添加额外的响应头
+            response.headers['Content-Length'] = str(file_size)
+            response.headers['Cache-Control'] = 'no-cache'
+            
+            logger.info(f"文件下载响应已发送: {filename}")
+            return response
+            
+        except Exception as send_error:
+            logger.error(f"发送文件时出错: {send_error}")
+            return jsonify({
+                'success': False,
+                'message': f'发送文件失败: {str(send_error)}'
+            }), 500
         
     except Exception as e:
         logger.error(f"下载文件API错误: {e}")
+        logger.error(f"错误详情: {traceback.format_exc()}")
         return jsonify({
             'success': False,
             'message': f'下载失败: {str(e)}'
