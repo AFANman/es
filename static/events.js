@@ -119,6 +119,7 @@ class EventsPage {
         this.isPulling = false;
         this.pullThreshold = 80;
         this.api = new ApiService();
+        this.isDownloading = false;
         
         this.init();
     }
@@ -168,12 +169,11 @@ class EventsPage {
             this.returnToMain();
         });
 
-        // 立即下载按钮
+        // 立即下载按钮（确保不会重复绑定）
         const downloadProgressBtn = document.getElementById('downloadProgressBtn');
         if (downloadProgressBtn) {
-            downloadProgressBtn.addEventListener('click', () => {
-                this.downloadResult();
-            });
+            downloadProgressBtn.onclick = null;
+            downloadProgressBtn.onclick = () => this.downloadResult();
         }
 
         // 通知关闭按钮
@@ -406,7 +406,9 @@ class EventsPage {
             const eventDate = event.date || '未知日期';
             const cardCount = event.cards ? event.cards.length : (event.card_count || 0);
             const eventType = event.type || '活动';
-            
+            const eventPath = event.path || '';
+            const eventUrl = event.url || '';
+
             return `
             <div class="event-item" data-event-id="${eventId}">
                 <div class="event-checkbox">
@@ -422,10 +424,15 @@ class EventsPage {
                         <span class="event-type">${eventType}</span>
                         <span class="event-cards">${cardCount} 张卡面</span>
                     </div>
+                    <div class="preview-details">
+                        ${eventPath ? `
+                        <div class="detail-row">
+                            <span class="label">路径:</span>
+                            <span class="value">${eventPath}</span>
+                        </div>
+                        ` : ''}
+                    </div>
                 </div>
-                <button class="event-preview-btn" onclick="eventsPage.showEventPreview('${eventId}')">
-                    <i class="fas fa-eye"></i>
-                </button>
             </div>
             `;
         }).join('');
@@ -551,9 +558,12 @@ class EventsPage {
 
     // 更新选中数量显示
     updateSelectedCount() {
-        document.getElementById('selectedCount').textContent = `已选择 ${this.selectedEvents.size} 个活动`;
-        document.getElementById('actionSummary').textContent = 
-            this.selectedEvents.size > 0 ? `已选择 ${this.selectedEvents.size} 个活动` : '请选择要爬取的活动';
+        const summaryEl = document.getElementById('actionSummary');
+        if (summaryEl) {
+            summaryEl.textContent = this.selectedEvents.size > 0 
+                ? `已选择 ${this.selectedEvents.size} 个活动` 
+                : '请选择要爬取的活动';
+        }
     }
 
     // 更新爬取按钮状态
@@ -813,8 +823,16 @@ class EventsPage {
 
     // 下载结果文件
     async downloadResult() {
+        // 防止并发或重复触发导致多次下载
+        if (this.isDownloading) {
+            console.warn('下载正在进行中，已忽略重复点击');
+            return;
+        }
+
+        this.isDownloading = true;
         if (!this.downloadUrl) {
             this.showNotification('下载链接不可用', 'error');
+            this.isDownloading = false;
             return;
         }
         
@@ -888,6 +906,8 @@ class EventsPage {
         } catch (error) {
             console.error("下载过程中发生错误:", error);
             this.showNotification(`下载失败: ${error.message}`, 'error');
+        } finally {
+            this.isDownloading = false;
         }
     }
 
