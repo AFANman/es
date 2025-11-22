@@ -486,6 +486,35 @@ def analyze():
             'message': f'服务器错误: {str(e)}'
         }), 500
 
+# ---- /es/api 路由别名（用于通过 Nginx 或子路径访问）----
+@app.route('/es/api/analyze', methods=['POST'])
+def analyze_es_alias():
+    return analyze()
+
+@app.route('/es/api/events/<session_id>', methods=['GET'])
+def get_events_es_alias(session_id):
+    return get_events(session_id)
+
+@app.route('/es/api/crawl/start', methods=['POST'])
+def start_crawl_es_alias():
+    return start_crawl()
+
+@app.route('/es/api/progress/<task_id>', methods=['GET'])
+def get_progress_es_alias(task_id):
+    return get_progress(task_id)
+
+@app.route('/es/api/cancel/<task_id>', methods=['POST'])
+def cancel_crawl_es_alias(task_id):
+    return cancel_crawl(task_id)
+
+@app.route('/es/api/download/<task_id>', methods=['GET'])
+def download_result_es_alias(task_id):
+    return download_result(task_id)
+
+@app.route('/es/api/tasks', methods=['GET'])
+def list_tasks_es_alias():
+    return list_tasks()
+
 @app.route('/api/events/<session_id>', methods=['GET'])
 def get_events(session_id):
     """从Redis获取活动数据API"""

@@ -611,8 +611,50 @@ def extract_cards_from_directory(html: str, base_url: str) -> List[Tuple[str, st
     print("活动分布:")
     for event, count in event_counts.items():
         print(f"  {event}: {count} 个卡面")
-    
-    # Return all found cards (no limit)
+    all_links = soup.find_all('a', href=True)
+    seen_urls = {u for u, _ in unique_pairs}
+    extra_pairs = []
+    for link in all_links:
+        href = link.get('href', '')
+        text = link.get_text(strip=True)
+        if ('ensemble-star-music/' in href and
+            re.search(r'/\d+$', href) and
+            text.startswith('［') and '］' in text and
+            len(text) > 5 and
+            '一覧' not in text and
+            'カード一覧' not in text):
+            if href.startswith('http'):
+                card_url = href
+            else:
+                card_url = 'https://gamerch.com' + href.lstrip('/')
+            if card_url in seen_urls:
+                continue
+            event_name = ''
+            header = None
+            p = link
+            for _ in range(50):
+                if hasattr(p, 'previous_sibling') and p.previous_sibling:
+                    p = p.previous_sibling
+                elif hasattr(p, 'parent') and p.parent:
+                    p = p.parent
+                else:
+                    break
+                if hasattr(p, 'name') and p.name in ['h2', 'h3']:
+                    header = p
+                    break
+            if header:
+                ht = header.get_text(strip=True)
+                event_name = extract_event_name_from_context(ht, '')
+            if not event_name:
+                container_text = link.parent.get_text(strip=True) if hasattr(link, 'parent') else ''
+                event_name = extract_event_name_from_context(container_text, '')
+            if not event_name:
+                event_name = '未知活动'
+            extra_pairs.append((card_url, event_name))
+            seen_urls.add(card_url)
+    if extra_pairs:
+        print(f"额外发现 {len(extra_pairs)} 个卡面详情链接")
+        unique_pairs.extend(extra_pairs)
     return unique_pairs
 
 
