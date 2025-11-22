@@ -260,7 +260,7 @@ def analyze_directory_url(url: str) -> Dict:
             # 在部分网络环境下可能出现证书链问题，这里临时关闭验证并抑制告警
             import urllib3
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-            response = requests.get(url, headers=headers, timeout=20, verify=False)
+            response = requests.get(url, headers=headers, timeout=40, verify=False)
             response.raise_for_status()
             html_content = response.text
             logger.info(f"页面内容获取成功，长度: {len(html_content)} 字符")
@@ -435,6 +435,22 @@ def results():
 def events():
     """活动列表页面"""
     return render_template('events.html')
+
+@app.route('/es/')
+def index_es():
+    return index()
+
+@app.route('/es/events')
+def events_es():
+    return events()
+
+@app.route('/es/results')
+def results_es():
+    return results()
+
+@app.route('/es/static/<path:filename>')
+def static_es(filename):
+    return app.send_static_file(filename)
 
 @app.route('/api/analyze', methods=['POST'])
 def analyze():

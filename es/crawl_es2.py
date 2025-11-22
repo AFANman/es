@@ -620,7 +620,7 @@ def extract_cards_from_directory(html: str, base_url: str) -> List[Tuple[str, st
         if ('ensemble-star-music/' in href and
             re.search(r'/\d+$', href) and
             text.startswith('［') and '］' in text and
-            len(text) > 5 and
+            len(text) > 10 and
             '一覧' not in text and
             'カード一覧' not in text):
             if href.startswith('http'):
@@ -644,10 +644,16 @@ def extract_cards_from_directory(html: str, base_url: str) -> List[Tuple[str, st
                     break
             if header:
                 ht = header.get_text(strip=True)
-                event_name = extract_event_name_from_context(ht, '')
+                m = re.search(r'(\d{1,2})月(\d{1,2})日', ht)
+                if m:
+                    simple_date = f"{int(m.group(1)):02d}月{int(m.group(2)):02d}日"
+                    event_name = extract_event_name_from_context(ht, simple_date)
             if not event_name:
                 container_text = link.parent.get_text(strip=True) if hasattr(link, 'parent') else ''
-                event_name = extract_event_name_from_context(container_text, '')
+                m2 = re.search(r'(\d{1,2})月(\d{1,2})日', container_text)
+                if m2:
+                    simple_date2 = f"{int(m2.group(1)):02d}月{int(m2.group(2)):02d}日"
+                    event_name = extract_event_name_from_context(container_text, simple_date2)
             if not event_name:
                 event_name = '未知活动'
             extra_pairs.append((card_url, event_name))
@@ -1629,7 +1635,7 @@ def export_cards_to_excel(url: str, output_dir: str = None, max_workers: int = 8
         # 创建多线程获取器
         fetcher = MultiThreadedCardFetcher(
             max_workers=max_workers,
-            timeout=15,
+            timeout=30,
             delay=0.1
         )
         
